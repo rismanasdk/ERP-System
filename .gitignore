@@ -34,3 +34,6 @@ db_data/
 .idea/
 *.swp
 .DS_Store
+
+# Personal folder
+docs/*
