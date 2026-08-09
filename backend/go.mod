@@ -1,6 +1,6 @@
 module erp-system/backend
 
-go 1.23
+go 1.25.0
 
 require (
 	github.com/alexedwards/argon2id v1.0.0
@@ -12,5 +12,6 @@ require (
 
 require (
 	golang.org/x/crypto v0.19.0 // indirect
-	golang.org/x/sys v0.17.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
 )

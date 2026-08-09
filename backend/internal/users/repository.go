@@ -13,6 +13,32 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) BeginTx(ctx context.Context) (*sql.Tx, error) {
+	return r.db.BeginTx(ctx, nil)
+}
+
+func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, user *User) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx, `
+        INSERT INTO users (email, password_hash, name)
+        VALUES ($1, $2, $3)
+        RETURNING id
+    `, user.Email, user.PasswordHash, user.Name).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (r *Repository) AddRoleWithTx(ctx context.Context, tx *sql.Tx, userID, roleID int64) error {
+	_, err := tx.ExecContext(ctx, `
+        INSERT INTO user_roles (user_id, role_id)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+    `, userID, roleID)
+	return err
+}
+
 func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
 	user := &User{}
 	err := r.db.QueryRowContext(ctx, `

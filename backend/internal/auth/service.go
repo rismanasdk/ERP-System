@@ -49,23 +49,39 @@ func (s *Service) CreateUser(ctx context.Context, user *users.User, initialRoleN
 	}
 	user.PasswordHash = hashedPassword
 
-	id, err := s.userRepo.Create(ctx, user)
+	tx, err := s.userRepo.BeginTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	id, err := s.userRepo.CreateWithTx(ctx, tx, user)
 	if err != nil {
 		return 0, err
 	}
 
 	if initialRoleName != "" {
-		role, err := s.roleRepo.GetByName(ctx, initialRoleName)
+		role, err := s.roleRepo.GetByNameTx(ctx, tx, initialRoleName)
 		if err != nil {
 			return 0, err
 		}
 		if role == nil {
 			return 0, errors.New("role does not exist")
 		}
-		if err := s.userRepo.AddRole(ctx, id, role.ID); err != nil {
+		if err := s.userRepo.AddRoleWithTx(ctx, tx, id, role.ID); err != nil {
 			return 0, err
 		}
 	}
+
+	err = tx.Commit()
+	if err != nil {
+		return 0, err
+	}
+
 	return id, nil
 }
 
