@@ -41,25 +41,25 @@ func NewHandler(authService *Service) *Handler {
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.JSONError(w, http.StatusBadRequest, err)
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid request body"))
 		return
 	}
 
 	user, _, err := h.authService.Authenticate(r.Context(), req.Email, req.Password)
 	if err != nil {
-		response.JSONError(w, http.StatusUnauthorized, err)
+		response.JSONError(w, http.StatusUnauthorized, response.NewAPIError(http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid credentials"))
 		return
 	}
 
 	refreshToken, err := h.authService.CreateRefreshToken(r.Context(), user.ID)
 	if err != nil {
-		response.JSONError(w, http.StatusInternalServerError, err)
+		response.JSONError(w, http.StatusInternalServerError, response.NewAPIError(http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "internal server error"))
 		return
 	}
 
 	token, err := jwt.GenerateToken(user.ID, 24*time.Hour)
 	if err != nil {
-		response.JSONError(w, http.StatusInternalServerError, err)
+		response.JSONError(w, http.StatusInternalServerError, response.NewAPIError(http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "internal server error"))
 		return
 	}
 
@@ -69,21 +69,21 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var req RefreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.JSONError(w, http.StatusBadRequest, err)
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid request body"))
 		return
 	}
 	if req.RefreshToken == "" {
-		response.JSONError(w, http.StatusBadRequest, errors.New("refresh_token is required"))
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "refresh_token is required"))
 		return
 	}
 
 	token, refreshToken, err := h.authService.RefreshAccessToken(r.Context(), req.RefreshToken)
 	if err != nil {
 		if errors.Is(err, ErrInvalidRefreshToken) {
-			response.JSONError(w, http.StatusUnauthorized, err)
+			response.JSONError(w, http.StatusUnauthorized, response.NewAPIError(http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "invalid refresh token"))
 			return
 		}
-		response.JSONError(w, http.StatusInternalServerError, err)
+		response.JSONError(w, http.StatusInternalServerError, response.NewAPIError(http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "internal server error"))
 		return
 	}
 
