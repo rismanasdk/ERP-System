@@ -327,16 +327,27 @@ func TestRefreshAccessToken_RevokedToken(t *testing.T) {
 		time.Now(),
 		time.Now().Add(-24*time.Hour),
 	))
-	mock.ExpectRollback()
+	mock.ExpectExec(regexp.QuoteMeta(`
+        UPDATE refresh_tokens
+        SET revoked_at = $1
+        WHERE family_id = $2 AND revoked_at IS NULL
+    `)).WithArgs(sqlmock.AnyArg(), "family").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 
 	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
 
-	_, _, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
+	accessToken, newRefreshToken, err := authService.RefreshAccessToken(context.Background(), oldRefreshToken)
 	if err == nil {
 		t.Fatal("expected error for revoked refresh token")
 	}
 	if err != ErrInvalidRefreshToken {
 		t.Fatalf("expected invalid refresh token error, got %v", err)
+	}
+	if accessToken != "" {
+		t.Fatal("expected no access token for reused refresh token")
+	}
+	if newRefreshToken != "" {
+		t.Fatal("expected no refresh token for reused refresh token")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
