@@ -2,12 +2,14 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
 	"erp-system/backend/internal/permissions"
 	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/users"
+	"erp-system/backend/pkg/jwt"
 	"erp-system/backend/pkg/password"
 )
 
@@ -44,6 +46,8 @@ func (s *Service) Authenticate(ctx context.Context, email, passwordPlain string)
 	return user, perms, nil
 }
 
+var ErrInvalidRefreshToken = errors.New("invalid refresh token")
+
 func (s *Service) CreateRefreshToken(ctx context.Context, userID int64) (string, error) {
 	rawToken, tokenHash, familyID, err := GenerateRefreshTokenData()
 	if err != nil {
@@ -76,6 +80,34 @@ func (s *Service) CreateRefreshToken(ctx context.Context, userID int64) (string,
 	}
 
 	return rawToken, nil
+}
+
+func (s *Service) RefreshAccessToken(ctx context.Context, rawRefreshToken string) (string, error) {
+	hash := hashRefreshToken(rawRefreshToken)
+
+	refreshToken, err := s.refreshRepo.FindByHash(ctx, hash)
+	if err != nil {
+		return "", err
+	}
+	if refreshToken == nil {
+		return "", ErrInvalidRefreshToken
+	}
+	if refreshToken.RevokedAt != nil {
+		return "", ErrInvalidRefreshToken
+	}
+	if refreshToken.ExpiresAt.Before(time.Now()) {
+		return "", ErrInvalidRefreshToken
+	}
+
+	user, err := s.userRepo.GetByID(ctx, refreshToken.UserID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrInvalidRefreshToken
+		}
+		return "", err
+	}
+
+	return jwt.GenerateToken(user.ID, 24*time.Hour)
 }
 
 func (s *Service) CreateUser(ctx context.Context, user *users.User, initialRoleName string) (int64, error) {

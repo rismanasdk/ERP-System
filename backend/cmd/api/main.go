@@ -66,6 +66,7 @@ func main() {
 	router := mux.NewRouter()
 	router.HandleFunc("/api/v1/health", healthHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/auth/login", authHandler.Login).Methods(http.MethodPost)
+	router.HandleFunc("/api/v1/auth/refresh", authHandler.Refresh).Methods(http.MethodPost)
 	router.Handle("/api/v1/users/protected", authMiddleware.Authenticate(authMiddleware.RequirePermission("users.read")(http.HandlerFunc(protectedUsersHandler)))).Methods(http.MethodGet)
 
 	log.Printf("Starting backend on port %s", port)
