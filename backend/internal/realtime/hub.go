@@ -60,11 +60,13 @@ func (h *Hub) ClientCount() int {
 
 func (h *Hub) Shutdown() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
+	clients := make([]*Client, 0, len(h.clients))
 	for client := range h.clients {
-		delete(h.clients, client)
-		close(client.send)
-		_ = client.conn.Close()
+		clients = append(clients, client)
+	}
+	h.mu.Unlock()
+
+	for _, client := range clients {
+		client.Close()
 	}
 }

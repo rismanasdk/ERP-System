@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -25,6 +26,34 @@ func TestEventCreation(t *testing.T) {
 	}
 }
 
+func TestEventSerialization(t *testing.T) {
+	event := Event{Type: "test.event", Data: map[string]any{"id": 123}}
+
+	raw, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("expected marshal to succeed, got %v", err)
+	}
+
+	var parsed Event
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("expected unmarshal to succeed, got %v", err)
+	}
+
+	if parsed.Type != event.Type {
+		t.Fatalf("expected type %q, got %q", event.Type, parsed.Type)
+	}
+
+	parsedData, ok := parsed.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected parsed data map, got %T", parsed.Data)
+	}
+
+	id, ok := parsedData["id"].(float64)
+	if !ok || id != 123 {
+		t.Fatalf("expected parsed data id 123, got %v", parsedData["id"])
+	}
+}
+
 func TestHubPublisherPublishesToHub(t *testing.T) {
 	hub := NewHub()
 	publisher := NewHubPublisher(hub)
@@ -40,10 +69,7 @@ func TestHubPublisherPublishesToHub(t *testing.T) {
 		t.Fatalf("expected no error publishing event, got %v", err)
 	}
 
-	time.Sleep(10 * time.Millisecond)
-	if len(conn.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(conn.messages))
-	}
+	waitForMessages(t, conn, 1, 200*time.Millisecond)
 }
 
 func TestPublisherNoClientsDoesNotError(t *testing.T) {
@@ -72,12 +98,9 @@ func TestMultipleClientsReceiveEvent(t *testing.T) {
 	if err := publisher.Publish(context.Background(), Event{Type: "test.event", Data: map[string]any{"value": true}}); err != nil {
 		t.Fatalf("expected no error publishing event, got %v", err)
 	}
-	time.Sleep(10 * time.Millisecond)
 
-	for i, conn := range conns {
-		if len(conn.messages) != 1 {
-			t.Fatalf("expected client %d to receive event, got %d messages", i+1, len(conn.messages))
-		}
+	for _, conn := range conns {
+		waitForMessages(t, conn, 1, 200*time.Millisecond)
 	}
 }
 
@@ -87,6 +110,7 @@ func TestConcurrentPublish(t *testing.T) {
 
 	conn := newFakeConn()
 	client := NewClient(hub, conn, &auth.Identity{UserID: 1})
+	client.send = make(chan []byte, 64)
 	client.Start()
 	time.Sleep(20 * time.Millisecond)
 	defer client.Close()
@@ -100,11 +124,8 @@ func TestConcurrentPublish(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	time.Sleep(20 * time.Millisecond)
 
-	if len(conn.messages) != 20 {
-		t.Fatalf("expected 20 messages, got %d", len(conn.messages))
-	}
+	waitForMessages(t, conn, 20, 500*time.Millisecond)
 }
 
 func TestPublishDoesNotChangeBusinessData(t *testing.T) {
