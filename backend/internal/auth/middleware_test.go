@@ -36,6 +36,9 @@ func TestAuthenticateMiddleware(t *testing.T) {
 }
 
 func TestAuthenticateMiddlewareExpiredToken(t *testing.T) {
+	if err := jwt.Configure("test-secret"); err != nil {
+		t.Fatal(err)
+	}
 	token, err := jwt.GenerateToken(1, -time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +61,9 @@ func TestAuthenticateMiddlewareExpiredToken(t *testing.T) {
 }
 
 func TestRequirePermissionMiddleware(t *testing.T) {
+	if err := jwt.Configure("test-secret"); err != nil {
+		t.Fatal(err)
+	}
 	validToken, err := jwt.GenerateToken(1, time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +87,9 @@ func TestRequirePermissionMiddleware(t *testing.T) {
 }
 
 func TestRequirePermissionMiddlewareForbidden(t *testing.T) {
+	if err := jwt.Configure("test-secret"); err != nil {
+		t.Fatal(err)
+	}
 	validToken, err := jwt.GenerateToken(1, time.Hour)
 	if err != nil {
 		t.Fatal(err)

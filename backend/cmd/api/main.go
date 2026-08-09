@@ -5,12 +5,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"erp-system/backend/internal/auth"
 	"erp-system/backend/internal/permissions"
 	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/users"
 	"erp-system/backend/pkg/database"
+	"erp-system/backend/pkg/jwt"
 	"erp-system/backend/pkg/response"
 
 	"github.com/gorilla/mux"
@@ -41,6 +43,14 @@ func main() {
 	defer db.Close()
 
 	if err := database.Migrate(db); err != nil {
+		log.Fatal(err)
+	}
+
+	jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET environment variable must be set and non-empty")
+	}
+	if err := jwt.Configure(jwtSecret); err != nil {
 		log.Fatal(err)
 	}
 
