@@ -70,7 +70,8 @@ func main() {
 	userRepo := users.NewRepository(db)
 	roleRepo := roles.NewRepository(db)
 	permRepo := permissions.NewRepository(db)
-	authService := auth.NewService(userRepo, roleRepo, permRepo)
+	refreshRepo := auth.NewRefreshTokenRepository(db)
+	authService := auth.NewService(userRepo, roleRepo, permRepo, refreshRepo)
 
 	email := strings.TrimSpace(os.Getenv("BOOTSTRAP_ADMIN_EMAIL"))
 	name := strings.TrimSpace(os.Getenv("BOOTSTRAP_ADMIN_NAME"))

@@ -57,7 +57,8 @@ func main() {
 	userRepo := users.NewRepository(db)
 	roleRepo := roles.NewRepository(db)
 	permRepo := permissions.NewRepository(db)
-	authService := auth.NewService(userRepo, roleRepo, permRepo)
+	refreshRepo := auth.NewRefreshTokenRepository(db)
+	authService := auth.NewService(userRepo, roleRepo, permRepo, refreshRepo)
 	authHandler := auth.NewHandler(authService)
 
 	authMiddleware := auth.NewMiddleware(authService)
