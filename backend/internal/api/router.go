@@ -5,19 +5,21 @@ import (
 
 	"erp-system/backend/internal/auth"
 	"erp-system/backend/internal/permissions"
+	"erp-system/backend/internal/realtime"
 	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/users"
 
 	"github.com/gorilla/mux"
 )
 
-func NewRouter(authService *auth.Service, userRepo *users.Repository, roleRepo *roles.Repository, permRepo *permissions.Repository) http.Handler {
+func NewRouter(authService *auth.Service, userRepo *users.Repository, roleRepo *roles.Repository, permRepo *permissions.Repository, realtimeHub *realtime.Hub) http.Handler {
 	r := mux.NewRouter()
 
 	api := r.PathPrefix("/api/v1").Subrouter()
 
 	authHandler := auth.NewHandler(authService)
 	authMiddleware := auth.NewMiddleware(authService)
+	realtimeHandler := realtime.NewHandler(realtimeHub)
 
 	api.Path("/auth/login").HandlerFunc(authHandler.Login).Methods(http.MethodPost)
 	api.Path("/auth/refresh").HandlerFunc(authHandler.Refresh).Methods(http.MethodPost)
@@ -27,6 +29,8 @@ func NewRouter(authService *auth.Service, userRepo *users.Repository, roleRepo *
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"data":{"message":"permission granted"},"message":"success"}`))
 	}))))
+
+	api.Path("/ws").Handler(authMiddleware.Authenticate(http.HandlerFunc(realtimeHandler.HandleWebSocket))).Methods(http.MethodGet)
 
 	api.Path("/roles").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
