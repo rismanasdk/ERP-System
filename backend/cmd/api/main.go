@@ -50,9 +50,12 @@ func main() {
 	authService := auth.NewService(userRepo, roleRepo, permRepo)
 	authHandler := auth.NewHandler(authService)
 
+	authMiddleware := auth.NewMiddleware(authService)
+
 	router := mux.NewRouter()
 	router.HandleFunc("/api/v1/health", healthHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/auth/login", authHandler.Login).Methods(http.MethodPost)
+	router.Handle("/api/v1/users/protected", authMiddleware.Authenticate(authMiddleware.RequirePermission("users.read")(http.HandlerFunc(protectedUsersHandler)))).Methods(http.MethodGet)
 
 	log.Printf("Starting backend on port %s", port)
 	if err := http.ListenAndServe(":"+port, router); err != nil {
@@ -62,6 +65,10 @@ func main() {
 
 func authHandler(h *auth.Handler) http.HandlerFunc {
 	return h.Login
+}
+
+func protectedUsersHandler(w http.ResponseWriter, r *http.Request) {
+	response.JSONOK(w, map[string]string{"message": "permission granted"})
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
