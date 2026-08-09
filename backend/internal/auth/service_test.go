@@ -1,15 +1,20 @@
 package auth
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/base64"
 	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"testing"
 	"time"
 
 	"erp-system/backend/internal/users"
+	"erp-system/backend/pkg/jwt"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -132,6 +137,190 @@ func TestCreateRefreshToken_StoresHashNotPlaintext(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRefreshAccessToken_ValidToken(t *testing.T) {
+	oldRefreshToken := "valid-refresh-token-plain"
+	hash := hashRefreshToken(oldRefreshToken)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	timeNow := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
+        FROM refresh_tokens
+        WHERE token_hash = $1
+    `)).WithArgs(hash).WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "family_id", "expires_at", "revoked_at", "created_at"}).AddRow(
+		int64(1),
+		int64(123),
+		hash,
+		"family",
+		timeNow.Add(24*time.Hour),
+		nil,
+		timeNow,
+	))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, email, password_hash, name, created_at, updated_at
+        FROM users
+        WHERE id = $1
+    `)).WithArgs(int64(123)).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+		int64(123),
+		"test@example.com",
+		"hash",
+		"Test User",
+		timeNow,
+		timeNow,
+	))
+
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+
+	token, err := authService.RefreshAccessToken(context.Background(), oldRefreshToken)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if token == "" {
+		t.Fatal("expected access token")
+	}
+	if _, err := jwt.ParseToken(token); err != nil {
+		t.Fatalf("expected valid jwt token, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRefreshAccessToken_InvalidTokenNotFound(t *testing.T) {
+	oldRefreshToken := "missing-refresh-token"
+	hash := hashRefreshToken(oldRefreshToken)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
+        FROM refresh_tokens
+        WHERE token_hash = $1
+    `)).WithArgs(hash).WillReturnError(sql.ErrNoRows)
+
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+
+	_, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
+	if err == nil {
+		t.Fatal("expected error for missing refresh token")
+	}
+	if err != ErrInvalidRefreshToken {
+		t.Fatalf("expected invalid refresh token error, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRefreshAccessToken_ExpiredToken(t *testing.T) {
+	oldRefreshToken := "expired-refresh-token"
+	hash := hashRefreshToken(oldRefreshToken)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
+        FROM refresh_tokens
+        WHERE token_hash = $1
+    `)).WithArgs(hash).WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "family_id", "expires_at", "revoked_at", "created_at"}).AddRow(
+		int64(1),
+		int64(123),
+		hash,
+		"family",
+		time.Now().Add(-1*time.Hour),
+		nil,
+		time.Now().Add(-24*time.Hour),
+	))
+
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+
+	_, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
+	if err == nil {
+		t.Fatal("expected error for expired refresh token")
+	}
+	if err != ErrInvalidRefreshToken {
+		t.Fatalf("expected invalid refresh token error, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRefreshAccessToken_RevokedToken(t *testing.T) {
+	oldRefreshToken := "revoked-refresh-token"
+	hash := hashRefreshToken(oldRefreshToken)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
+        FROM refresh_tokens
+        WHERE token_hash = $1
+    `)).WithArgs(hash).WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "family_id", "expires_at", "revoked_at", "created_at"}).AddRow(
+		int64(1),
+		int64(123),
+		hash,
+		"family",
+		time.Now().Add(24*time.Hour),
+		time.Now(),
+		time.Now().Add(-24*time.Hour),
+	))
+
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+
+	_, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
+	if err == nil {
+		t.Fatal("expected error for revoked refresh token")
+	}
+	if err != ErrInvalidRefreshToken {
+		t.Fatalf("expected invalid refresh token error, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRefreshHandler_MalformedRequest(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+	handler := NewHandler(authService)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewBufferString(`{}`))
+	w := httptest.NewRecorder()
+
+	handler.Refresh(w, req)
+	res := w.Result()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", res.StatusCode)
 	}
 }
 

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -18,6 +19,14 @@ type LoginResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	User         any    `json:"user"`
+}
+
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+type RefreshResponse struct {
+	AccessToken string `json:"access_token"`
 }
 
 type Handler struct {
@@ -54,4 +63,28 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSONOK(w, LoginResponse{AccessToken: token, RefreshToken: refreshToken, User: user})
+}
+
+func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var req RefreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.JSONError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.RefreshToken == "" {
+		response.JSONError(w, http.StatusBadRequest, errors.New("refresh_token is required"))
+		return
+	}
+
+	token, err := h.authService.RefreshAccessToken(r.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, ErrInvalidRefreshToken) {
+			response.JSONError(w, http.StatusUnauthorized, err)
+			return
+		}
+		response.JSONError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	response.JSONOK(w, RefreshResponse{AccessToken: token})
 }
