@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"erp-system/backend/internal/auth"
 )
 
 func TestEventCreation(t *testing.T) {
@@ -28,7 +30,7 @@ func TestHubPublisherPublishesToHub(t *testing.T) {
 	publisher := NewHubPublisher(hub)
 
 	conn := newFakeConn()
-	client := NewClient(hub, conn, 1)
+	client := NewClient(hub, conn, &auth.Identity{UserID: 1})
 	client.Start()
 	time.Sleep(20 * time.Millisecond)
 	defer client.Close()
@@ -61,7 +63,7 @@ func TestMultipleClientsReceiveEvent(t *testing.T) {
 	conns := make([]*fakeConn, 5)
 	for i := 0; i < 5; i++ {
 		conns[i] = newFakeConn()
-		clients[i] = NewClient(hub, conns[i], int64(i+1))
+		clients[i] = NewClient(hub, conns[i], &auth.Identity{UserID: int64(i + 1)})
 		clients[i].Start()
 		defer clients[i].Close()
 	}
@@ -84,7 +86,7 @@ func TestConcurrentPublish(t *testing.T) {
 	publisher := NewHubPublisher(hub)
 
 	conn := newFakeConn()
-	client := NewClient(hub, conn, 1)
+	client := NewClient(hub, conn, &auth.Identity{UserID: 1})
 	client.Start()
 	time.Sleep(20 * time.Millisecond)
 	defer client.Close()

@@ -210,3 +210,19 @@ func (s *Service) HasPermission(ctx context.Context, userID int64, permission st
 	}
 	return false, nil
 }
+
+func (s *Service) GetIdentity(ctx context.Context, userID int64) (*Identity, error) {
+	roles, err := s.userRepo.GetRoleNames(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	permissions, err := s.userRepo.GetPermissionNames(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &Identity{
+		UserID:      userID,
+		Roles:       roles,
+		Permissions: permissions,
+	}, nil
+}

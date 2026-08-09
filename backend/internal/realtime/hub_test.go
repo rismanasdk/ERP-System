@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"erp-system/backend/internal/auth"
 )
 
 type fakeConn struct {
@@ -38,7 +40,7 @@ func (f *fakeConn) Close() error {
 func TestHubRegisterUnregister(t *testing.T) {
 	hub := NewHub()
 	conn := newFakeConn()
-	client := NewClient(hub, conn, 1)
+	client := NewClient(hub, conn, &auth.Identity{UserID: 1})
 
 	hub.Register(client)
 	if got := hub.ClientCount(); got != 1 {
@@ -56,9 +58,8 @@ func TestHubBroadcast(t *testing.T) {
 	conn1 := newFakeConn()
 	conn2 := newFakeConn()
 
-	client1 := NewClient(hub, conn1, 1)
-	client2 := NewClient(hub, conn2, 2)
-
+	client1 := NewClient(hub, conn1, &auth.Identity{UserID: 1})
+	client2 := NewClient(hub, conn2, &auth.Identity{UserID: 2})
 	client1.Start()
 	client2.Start()
 	time.Sleep(20 * time.Millisecond)
@@ -83,7 +84,7 @@ func TestHubConcurrentRegisterBroadcastUnregister(t *testing.T) {
 
 	for i := 0; i < 50; i++ {
 		conn := newFakeConn()
-		clients[i] = NewClient(hub, conn, int64(i+1))
+		clients[i] = NewClient(hub, conn, &auth.Identity{UserID: int64(i + 1)})
 	}
 
 	for _, client := range clients {
@@ -121,8 +122,7 @@ func TestHubConcurrentRegisterBroadcastUnregister(t *testing.T) {
 func TestClientCloseCleanup(t *testing.T) {
 	hub := NewHub()
 	conn := newFakeConn()
-	client := NewClient(hub, conn, 1)
-	client.Start()
+	client := NewClient(hub, conn, &auth.Identity{UserID: 1})
 
 	client.Close()
 	time.Sleep(10 * time.Millisecond)
