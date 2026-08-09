@@ -30,6 +30,33 @@ func (f *fakeConn) WriteMessage(messageType int, data []byte) error {
 	return nil
 }
 
+func (f *fakeConn) MessageCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.messages)
+}
+
+func (f *fakeConn) Messages() [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	copies := make([][]byte, len(f.messages))
+	for i, msg := range f.messages {
+		copies[i] = append([]byte(nil), msg...)
+	}
+	return copies
+}
+
+func waitForMessages(t *testing.T, conn *fakeConn, expected int, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if conn.MessageCount() >= expected {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("expected %d messages within %v, got %d", expected, timeout, conn.MessageCount())
+}
+
 func (f *fakeConn) SetReadLimit(limit int64)           {}
 func (f *fakeConn) SetWriteDeadline(t time.Time) error { return nil }
 func (f *fakeConn) Close() error {
@@ -67,13 +94,16 @@ func TestHubBroadcast(t *testing.T) {
 	defer client2.Close()
 
 	hub.Broadcast([]byte("hello"))
-	time.Sleep(10 * time.Millisecond)
+	waitForMessages(t, conn1, 1, 200*time.Millisecond)
+	waitForMessages(t, conn2, 1, 200*time.Millisecond)
 
-	if len(conn1.messages) != 1 || string(conn1.messages[0]) != "hello" {
-		t.Fatalf("expected client1 to receive hello, got %v", conn1.messages)
+	conn1Messages := conn1.Messages()
+	conn2Messages := conn2.Messages()
+	if string(conn1Messages[0]) != "hello" {
+		t.Fatalf("expected client1 to receive hello, got %v", conn1Messages)
 	}
-	if len(conn2.messages) != 1 || string(conn2.messages[0]) != "hello" {
-		t.Fatalf("expected client2 to receive hello, got %v", conn2.messages)
+	if string(conn2Messages[0]) != "hello" {
+		t.Fatalf("expected client2 to receive hello, got %v", conn2Messages)
 	}
 }
 
@@ -116,6 +146,51 @@ func TestHubConcurrentRegisterBroadcastUnregister(t *testing.T) {
 	wg.Wait()
 	if got := hub.ClientCount(); got != 0 {
 		t.Fatalf("expected 0 clients after unregister, got %d", got)
+	}
+}
+
+func TestHubBroadcastDoesNotSendToClosedClient(t *testing.T) {
+	hub := NewHub()
+	conn1 := newFakeConn()
+	conn2 := newFakeConn()
+
+	client1 := NewClient(hub, conn1, &auth.Identity{UserID: 1})
+	client2 := NewClient(hub, conn2, &auth.Identity{UserID: 2})
+	client1.Start()
+	client2.Start()
+	time.Sleep(20 * time.Millisecond)
+
+	client1.Close()
+	time.Sleep(20 * time.Millisecond)
+
+	hub.Broadcast([]byte("world"))
+	time.Sleep(10 * time.Millisecond)
+
+	if conn1.MessageCount() != 0 {
+		t.Fatalf("expected closed client to receive 0 messages, got %d", conn1.MessageCount())
+	}
+	conn2Messages := conn2.Messages()
+	if conn2.MessageCount() != 1 || string(conn2Messages[0]) != "world" {
+		t.Fatalf("expected active client2 to receive world, got %v", conn2Messages)
+	}
+}
+
+func TestHubShutdownRemovesClients(t *testing.T) {
+	hub := NewHub()
+	conn1 := newFakeConn()
+	conn2 := newFakeConn()
+
+	client1 := NewClient(hub, conn1, &auth.Identity{UserID: 1})
+	client2 := NewClient(hub, conn2, &auth.Identity{UserID: 2})
+	client1.Start()
+	client2.Start()
+	time.Sleep(20 * time.Millisecond)
+
+	hub.Shutdown()
+	time.Sleep(20 * time.Millisecond)
+
+	if got := hub.ClientCount(); got != 0 {
+		t.Fatalf("expected 0 clients after shutdown, got %d", got)
 	}
 }
 
