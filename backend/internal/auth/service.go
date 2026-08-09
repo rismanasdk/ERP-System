@@ -68,3 +68,16 @@ func (s *Service) CreateUser(ctx context.Context, user *users.User, initialRoleN
 	}
 	return id, nil
 }
+
+func (s *Service) HasPermission(ctx context.Context, userID int64, permission string) (bool, error) {
+	permissions, err := s.userRepo.GetPermissionNames(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range permissions {
+		if p == permission {
+			return true, nil
+		}
+	}
+	return false, nil
+}
