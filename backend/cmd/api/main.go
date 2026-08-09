@@ -9,6 +9,7 @@ import (
 
 	"erp-system/backend/internal/auth"
 	"erp-system/backend/internal/permissions"
+	"erp-system/backend/internal/realtime"
 	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/users"
 	"erp-system/backend/pkg/database"
@@ -62,21 +63,20 @@ func main() {
 	authHandler := auth.NewHandler(authService)
 
 	authMiddleware := auth.NewMiddleware(authService)
+	realtimeHub := realtime.NewHub()
+	realtimeHandler := realtime.NewHandler(realtimeHub)
 
 	router := mux.NewRouter()
 	router.HandleFunc("/api/v1/health", healthHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/auth/login", authHandler.Login).Methods(http.MethodPost)
 	router.HandleFunc("/api/v1/auth/refresh", authHandler.Refresh).Methods(http.MethodPost)
 	router.Handle("/api/v1/users/protected", authMiddleware.Authenticate(authMiddleware.RequirePermission("users.read")(http.HandlerFunc(protectedUsersHandler)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/ws", authMiddleware.Authenticate(http.HandlerFunc(realtimeHandler.HandleWebSocket))).Methods(http.MethodGet)
 
 	log.Printf("Starting backend on port %s", port)
 	if err := http.ListenAndServe(":"+port, router); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func authHandler(h *auth.Handler) http.HandlerFunc {
-	return h.Login
 }
 
 func protectedUsersHandler(w http.ResponseWriter, r *http.Request) {
