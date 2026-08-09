@@ -15,8 +15,9 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	AccessToken string `json:"access_token"`
-	User        any    `json:"user"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	User         any    `json:"user"`
 }
 
 type Handler struct {
@@ -40,11 +41,17 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	refreshToken, err := h.authService.CreateRefreshToken(r.Context(), user.ID)
+	if err != nil {
+		response.JSONError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	token, err := jwt.GenerateToken(user.ID, 24*time.Hour)
 	if err != nil {
 		response.JSONError(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	response.JSONOK(w, LoginResponse{AccessToken: token, User: user})
+	response.JSONOK(w, LoginResponse{AccessToken: token, RefreshToken: refreshToken, User: user})
 }

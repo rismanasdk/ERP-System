@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"time"
 
 	"erp-system/backend/internal/permissions"
 	"erp-system/backend/internal/roles"
@@ -11,13 +12,14 @@ import (
 )
 
 type Service struct {
-	userRepo *users.Repository
-	roleRepo *roles.Repository
-	permRepo *permissions.Repository
+	userRepo    *users.Repository
+	roleRepo    *roles.Repository
+	permRepo    *permissions.Repository
+	refreshRepo *RefreshTokenRepository
 }
 
-func NewService(userRepo *users.Repository, roleRepo *roles.Repository, permRepo *permissions.Repository) *Service {
-	return &Service{userRepo: userRepo, roleRepo: roleRepo, permRepo: permRepo}
+func NewService(userRepo *users.Repository, roleRepo *roles.Repository, permRepo *permissions.Repository, refreshRepo *RefreshTokenRepository) *Service {
+	return &Service{userRepo: userRepo, roleRepo: roleRepo, permRepo: permRepo, refreshRepo: refreshRepo}
 }
 
 func (s *Service) Authenticate(ctx context.Context, email, passwordPlain string) (*users.User, []string, error) {
@@ -40,6 +42,40 @@ func (s *Service) Authenticate(ctx context.Context, email, passwordPlain string)
 		return nil, nil, err
 	}
 	return user, perms, nil
+}
+
+func (s *Service) CreateRefreshToken(ctx context.Context, userID int64) (string, error) {
+	rawToken, tokenHash, familyID, err := GenerateRefreshTokenData()
+	if err != nil {
+		return "", err
+	}
+
+	refreshToken := &RefreshToken{
+		UserID:    userID,
+		TokenHash: tokenHash,
+		FamilyID:  familyID,
+		ExpiresAt: time.Now().Add(RefreshTokenExpiry),
+	}
+
+	tx, err := s.userRepo.BeginTx(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = s.refreshRepo.CreateWithTx(ctx, tx, refreshToken); err != nil {
+		return "", err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
+
+	return rawToken, nil
 }
 
 func (s *Service) CreateUser(ctx context.Context, user *users.User, initialRoleName string) (int64, error) {
