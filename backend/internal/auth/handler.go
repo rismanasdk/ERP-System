@@ -26,7 +26,8 @@ type RefreshRequest struct {
 }
 
 type RefreshResponse struct {
-	AccessToken string `json:"access_token"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type Handler struct {
@@ -76,7 +77,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.authService.RefreshAccessToken(r.Context(), req.RefreshToken)
+	token, refreshToken, err := h.authService.RefreshAccessToken(r.Context(), req.RefreshToken)
 	if err != nil {
 		if errors.Is(err, ErrInvalidRefreshToken) {
 			response.JSONError(w, http.StatusUnauthorized, err)
@@ -86,5 +87,5 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response.JSONOK(w, RefreshResponse{AccessToken: token})
+	response.JSONOK(w, RefreshResponse{AccessToken: token, RefreshToken: refreshToken})
 }

@@ -140,7 +140,7 @@ func TestCreateRefreshToken_StoresHashNotPlaintext(t *testing.T) {
 	}
 }
 
-func TestRefreshAccessToken_ValidToken(t *testing.T) {
+func TestRefreshAccessToken_ValidRotation(t *testing.T) {
 	oldRefreshToken := "valid-refresh-token-plain"
 	hash := hashRefreshToken(oldRefreshToken)
 
@@ -151,6 +151,7 @@ func TestRefreshAccessToken_ValidToken(t *testing.T) {
 	defer db.Close()
 
 	timeNow := time.Now()
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`
         SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
         FROM refresh_tokens
@@ -164,6 +165,33 @@ func TestRefreshAccessToken_ValidToken(t *testing.T) {
 		nil,
 		timeNow,
 	))
+	mock.ExpectExec(regexp.QuoteMeta(`
+        UPDATE refresh_tokens
+        SET revoked_at = $1
+        WHERE token_hash = $2
+    `)).WithArgs(sqlmock.AnyArg(), hash).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+    `)).WithArgs(
+		int64(123),
+		argMatcher(func(value driver.Value) bool {
+			str, ok := value.(string)
+			return ok && len(str) == 64 && isHex(str)
+		}),
+		"family",
+		argMatcher(func(value driver.Value) bool {
+			timeValue, ok := value.(time.Time)
+			if !ok {
+				return false
+			}
+			nowLower := timeNow.Add(RefreshTokenExpiry - 1*time.Minute)
+			nowUpper := timeNow.Add(RefreshTokenExpiry + 1*time.Minute)
+			return timeValue.After(nowLower) && timeValue.Before(nowUpper)
+		}),
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(2))
+	mock.ExpectCommit()
 	mock.ExpectQuery(regexp.QuoteMeta(`
         SELECT id, email, password_hash, name, created_at, updated_at
         FROM users
@@ -179,15 +207,21 @@ func TestRefreshAccessToken_ValidToken(t *testing.T) {
 
 	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
 
-	token, err := authService.RefreshAccessToken(context.Background(), oldRefreshToken)
+	token, newRefreshToken, err := authService.RefreshAccessToken(context.Background(), oldRefreshToken)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if token == "" {
 		t.Fatal("expected access token")
 	}
+	if newRefreshToken == "" {
+		t.Fatal("expected new refresh token")
+	}
 	if _, err := jwt.ParseToken(token); err != nil {
 		t.Fatalf("expected valid jwt token, got %v", err)
+	}
+	if _, err := base64.RawURLEncoding.DecodeString(newRefreshToken); err != nil {
+		t.Fatalf("expected valid base64 refresh token, got %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -205,15 +239,17 @@ func TestRefreshAccessToken_InvalidTokenNotFound(t *testing.T) {
 	}
 	defer db.Close()
 
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`
         SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
         FROM refresh_tokens
         WHERE token_hash = $1
     `)).WithArgs(hash).WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
 
 	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
 
-	_, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
+	_, _, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
 	if err == nil {
 		t.Fatal("expected error for missing refresh token")
 	}
@@ -236,6 +272,7 @@ func TestRefreshAccessToken_ExpiredToken(t *testing.T) {
 	}
 	defer db.Close()
 
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`
         SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
         FROM refresh_tokens
@@ -249,10 +286,11 @@ func TestRefreshAccessToken_ExpiredToken(t *testing.T) {
 		nil,
 		time.Now().Add(-24*time.Hour),
 	))
+	mock.ExpectRollback()
 
 	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
 
-	_, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
+	_, _, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
 	if err == nil {
 		t.Fatal("expected error for expired refresh token")
 	}
@@ -275,6 +313,7 @@ func TestRefreshAccessToken_RevokedToken(t *testing.T) {
 	}
 	defer db.Close()
 
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`
         SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
         FROM refresh_tokens
@@ -288,10 +327,11 @@ func TestRefreshAccessToken_RevokedToken(t *testing.T) {
 		time.Now(),
 		time.Now().Add(-24*time.Hour),
 	))
+	mock.ExpectRollback()
 
 	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
 
-	_, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
+	_, _, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
 	if err == nil {
 		t.Fatal("expected error for revoked refresh token")
 	}
