@@ -64,8 +64,41 @@ func (r *RefreshTokenRepository) FindByHash(ctx context.Context, tokenHash strin
 	return token, nil
 }
 
+func (r *RefreshTokenRepository) FindByHashWithTx(ctx context.Context, tx *sql.Tx, tokenHash string) (*RefreshToken, error) {
+	token := &RefreshToken{}
+	err := tx.QueryRowContext(ctx, `
+        SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
+        FROM refresh_tokens
+        WHERE token_hash = $1
+    `, tokenHash).Scan(
+		&token.ID,
+		&token.UserID,
+		&token.TokenHash,
+		&token.FamilyID,
+		&token.ExpiresAt,
+		&token.RevokedAt,
+		&token.CreatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return token, nil
+}
+
 func (r *RefreshTokenRepository) Revoke(ctx context.Context, tokenHash string, revokedAt time.Time) error {
 	_, err := r.db.ExecContext(ctx, `
+        UPDATE refresh_tokens
+        SET revoked_at = $1
+        WHERE token_hash = $2
+    `, revokedAt, tokenHash)
+	return err
+}
+
+func (r *RefreshTokenRepository) RevokeWithTx(ctx context.Context, tx *sql.Tx, tokenHash string, revokedAt time.Time) error {
+	_, err := tx.ExecContext(ctx, `
         UPDATE refresh_tokens
         SET revoked_at = $1
         WHERE token_hash = $2

@@ -82,32 +82,70 @@ func (s *Service) CreateRefreshToken(ctx context.Context, userID int64) (string,
 	return rawToken, nil
 }
 
-func (s *Service) RefreshAccessToken(ctx context.Context, rawRefreshToken string) (string, error) {
+func (s *Service) RefreshAccessToken(ctx context.Context, rawRefreshToken string) (string, string, error) {
 	hash := hashRefreshToken(rawRefreshToken)
 
-	refreshToken, err := s.refreshRepo.FindByHash(ctx, hash)
+	tx, err := s.userRepo.BeginTx(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	refreshToken, err := s.refreshRepo.FindByHashWithTx(ctx, tx, hash)
+	if err != nil {
+		return "", "", err
 	}
 	if refreshToken == nil {
-		return "", ErrInvalidRefreshToken
+		return "", "", ErrInvalidRefreshToken
 	}
 	if refreshToken.RevokedAt != nil {
-		return "", ErrInvalidRefreshToken
+		return "", "", ErrInvalidRefreshToken
 	}
 	if refreshToken.ExpiresAt.Before(time.Now()) {
-		return "", ErrInvalidRefreshToken
+		return "", "", ErrInvalidRefreshToken
 	}
+
+	newRawToken, newTokenHash, _, err := GenerateRefreshTokenData()
+	if err != nil {
+		return "", "", err
+	}
+	newRefreshToken := &RefreshToken{
+		UserID:    refreshToken.UserID,
+		TokenHash: newTokenHash,
+		FamilyID:  refreshToken.FamilyID,
+		ExpiresAt: time.Now().Add(RefreshTokenExpiry),
+	}
+
+	if err = s.refreshRepo.RevokeWithTx(ctx, tx, hash, time.Now()); err != nil {
+		return "", "", err
+	}
+	if _, err = s.refreshRepo.CreateWithTx(ctx, tx, newRefreshToken); err != nil {
+		return "", "", err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return "", "", err
+	}
+	tx = nil
 
 	user, err := s.userRepo.GetByID(ctx, refreshToken.UserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrInvalidRefreshToken
+			return "", "", ErrInvalidRefreshToken
 		}
-		return "", err
+		return "", "", err
 	}
 
-	return jwt.GenerateToken(user.ID, 24*time.Hour)
+	token, err := jwt.GenerateToken(user.ID, 24*time.Hour)
+	if err != nil {
+		return "", "", err
+	}
+
+	return token, newRawToken, nil
 }
 
 func (s *Service) CreateUser(ctx context.Context, user *users.User, initialRoleName string) (int64, error) {
