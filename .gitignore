@@ -35,5 +35,6 @@ db_data/
 *.swp
 .DS_Store
 
-# Personal folder
+# Personal folder & file
 docs/*
+trunk.sh
