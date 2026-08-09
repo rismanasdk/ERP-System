@@ -103,6 +103,13 @@ func (s *Service) RefreshAccessToken(ctx context.Context, rawRefreshToken string
 		return "", "", ErrInvalidRefreshToken
 	}
 	if refreshToken.RevokedAt != nil {
+		if err = s.refreshRepo.RevokeFamilyWithTx(ctx, tx, refreshToken.FamilyID, time.Now()); err != nil {
+			return "", "", err
+		}
+		if err = tx.Commit(); err != nil {
+			return "", "", err
+		}
+		tx = nil
 		return "", "", ErrInvalidRefreshToken
 	}
 	if refreshToken.ExpiresAt.Before(time.Now()) {

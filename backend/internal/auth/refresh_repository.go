@@ -114,3 +114,12 @@ func (r *RefreshTokenRepository) RevokeFamily(ctx context.Context, familyID stri
     `, revokedAt, familyID)
 	return err
 }
+
+func (r *RefreshTokenRepository) RevokeFamilyWithTx(ctx context.Context, tx *sql.Tx, familyID string, revokedAt time.Time) error {
+	_, err := tx.ExecContext(ctx, `
+        UPDATE refresh_tokens
+        SET revoked_at = $1
+        WHERE family_id = $2 AND revoked_at IS NULL
+    `, revokedAt, familyID)
+	return err
+}
