@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"erp-system/backend/internal/auth"
 	"erp-system/backend/pkg/logger"
 
 	"github.com/gorilla/websocket"
@@ -24,25 +25,29 @@ type websocketConn interface {
 }
 
 type Client struct {
-	hub       *Hub
+	hub       HubClientRegistrar
 	conn      websocketConn
 	send      chan []byte
-	userID    int64
+	identity  *auth.Identity
 	ctx       context.Context
 	cancel    context.CancelFunc
 	closeOnce sync.Once
 }
 
-func NewClient(hub *Hub, conn websocketConn, userID int64) *Client {
+func NewClient(hub HubClientRegistrar, conn websocketConn, identity *auth.Identity) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Client{
-		hub:    hub,
-		conn:   conn,
-		send:   make(chan []byte, 16),
-		userID: userID,
-		ctx:    ctx,
-		cancel: cancel,
+		hub:      hub,
+		conn:     conn,
+		send:     make(chan []byte, 16),
+		identity: identity,
+		ctx:      ctx,
+		cancel:   cancel,
 	}
+}
+
+func (c *Client) Identity() *auth.Identity {
+	return c.identity
 }
 
 func (c *Client) Start() {

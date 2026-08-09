@@ -11,11 +11,29 @@ import (
 
 type contextKey string
 
-const userIDContextKey contextKey = "userID"
+const (
+	userIDContextKey   contextKey = "userID"
+	identityContextKey contextKey = "identity"
+)
+
+type Identity struct {
+	UserID      int64    `json:"user_id"`
+	Roles       []string `json:"roles,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
+}
 
 func UserIDFromContext(ctx context.Context) (int64, bool) {
 	userID, ok := ctx.Value(userIDContextKey).(int64)
 	return userID, ok
+}
+
+func IdentityFromContext(ctx context.Context) (*Identity, bool) {
+	identity, ok := ctx.Value(identityContextKey).(*Identity)
+	return identity, ok
+}
+
+type IdentityProvider interface {
+	GetIdentity(ctx context.Context, userID int64) (*Identity, error)
 }
 
 type PermissionChecker interface {

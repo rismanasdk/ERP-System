@@ -64,7 +64,7 @@ func main() {
 
 	authMiddleware := auth.NewMiddleware(authService)
 	realtimeHub := realtime.NewHub()
-	realtimeHandler := realtime.NewHandler(realtimeHub)
+	realtimeHandler := realtime.NewHandler(realtimeHub, authService)
 
 	router := mux.NewRouter()
 	router.HandleFunc("/api/v1/health", healthHandler).Methods(http.MethodGet)

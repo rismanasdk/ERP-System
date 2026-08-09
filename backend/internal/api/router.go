@@ -19,7 +19,7 @@ func NewRouter(authService *auth.Service, userRepo *users.Repository, roleRepo *
 
 	authHandler := auth.NewHandler(authService)
 	authMiddleware := auth.NewMiddleware(authService)
-	realtimeHandler := realtime.NewHandler(realtimeHub)
+	realtimeHandler := realtime.NewHandler(realtimeHub, authService)
 
 	api.Path("/auth/login").HandlerFunc(authHandler.Login).Methods(http.MethodPost)
 	api.Path("/auth/refresh").HandlerFunc(authHandler.Refresh).Methods(http.MethodPost)

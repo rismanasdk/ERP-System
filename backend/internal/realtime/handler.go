@@ -17,12 +17,18 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-type Handler struct {
-	hub *Hub
+type HubClientRegistrar interface {
+	Register(*Client)
+	Unregister(*Client)
 }
 
-func NewHandler(hub *Hub) *Handler {
-	return &Handler{hub: hub}
+type Handler struct {
+	hub              HubClientRegistrar
+	identityProvider auth.IdentityProvider
+}
+
+func NewHandler(hub HubClientRegistrar, identityProvider auth.IdentityProvider) *Handler {
+	return &Handler{hub: hub, identityProvider: identityProvider}
 }
 
 func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +36,19 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if !ok || userID == 0 {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	identity := &auth.Identity{UserID: userID}
+	if h.identityProvider != nil {
+		id, err := h.identityProvider.GetIdentity(r.Context(), userID)
+		if err != nil {
+			logger.Error("WebSocket identity fetch failed: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if id != nil {
+			identity = id
+		}
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -40,6 +59,6 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("WebSocket connection accepted")
 
-	client := NewClient(h.hub, conn, userID)
+	client := NewClient(h.hub, conn, identity)
 	client.Start()
 }
