@@ -9,9 +9,15 @@ import (
 type fakeConn struct {
 	messages [][]byte
 	mu       sync.Mutex
+	readCh   chan struct{}
+}
+
+func newFakeConn() *fakeConn {
+	return &fakeConn{readCh: make(chan struct{})}
 }
 
 func (f *fakeConn) ReadMessage() (messageType int, p []byte, err error) {
+	<-f.readCh
 	return 0, nil, nil
 }
 
@@ -24,11 +30,14 @@ func (f *fakeConn) WriteMessage(messageType int, data []byte) error {
 
 func (f *fakeConn) SetReadLimit(limit int64)           {}
 func (f *fakeConn) SetWriteDeadline(t time.Time) error { return nil }
-func (f *fakeConn) Close() error                       { return nil }
+func (f *fakeConn) Close() error {
+	close(f.readCh)
+	return nil
+}
 
 func TestHubRegisterUnregister(t *testing.T) {
 	hub := NewHub()
-	conn := &fakeConn{}
+	conn := newFakeConn()
 	client := NewClient(hub, conn, 1)
 
 	hub.Register(client)
@@ -44,14 +53,15 @@ func TestHubRegisterUnregister(t *testing.T) {
 
 func TestHubBroadcast(t *testing.T) {
 	hub := NewHub()
-	conn1 := &fakeConn{}
-	conn2 := &fakeConn{}
+	conn1 := newFakeConn()
+	conn2 := newFakeConn()
 
 	client1 := NewClient(hub, conn1, 1)
 	client2 := NewClient(hub, conn2, 2)
 
 	client1.Start()
 	client2.Start()
+	time.Sleep(20 * time.Millisecond)
 	defer client1.Close()
 	defer client2.Close()
 
@@ -72,7 +82,7 @@ func TestHubConcurrentRegisterBroadcastUnregister(t *testing.T) {
 	clients := make([]*Client, 50)
 
 	for i := 0; i < 50; i++ {
-		conn := &fakeConn{}
+		conn := newFakeConn()
 		clients[i] = NewClient(hub, conn, int64(i+1))
 	}
 
@@ -110,7 +120,7 @@ func TestHubConcurrentRegisterBroadcastUnregister(t *testing.T) {
 
 func TestClientCloseCleanup(t *testing.T) {
 	hub := NewHub()
-	conn := &fakeConn{}
+	conn := newFakeConn()
 	client := NewClient(hub, conn, 1)
 	client.Start()
 
