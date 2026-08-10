@@ -20,7 +20,8 @@ func TestAuthHandler_MalformedRequestUsesStructuredError(t *testing.T) {
 	}
 	defer db.Close()
 
-	handler := NewHandler(NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db)))
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db), nil)
+	handler := NewHandler(authService)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{invalid`))
 	w := httptest.NewRecorder()
 
@@ -41,7 +42,8 @@ func TestAuthHandler_RefreshMissingTokenUsesStructuredError(t *testing.T) {
 	}
 	defer db.Close()
 
-	handler := NewHandler(NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db)))
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db), nil)
+	handler := NewHandler(authService)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewBufferString(`{"refresh_token":""}`))
 	w := httptest.NewRecorder()
 

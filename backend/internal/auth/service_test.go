@@ -6,13 +6,17 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"testing"
 	"time"
 
+	"erp-system/backend/internal/audit"
+	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/users"
 	"erp-system/backend/pkg/jwt"
 
@@ -83,6 +87,194 @@ func TestGenerateRefreshTokenData_Unique(t *testing.T) {
 	}
 }
 
+func TestCreateUser_AuditRecordedWithActor(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	userRepo := users.NewRepository(db)
+	roleRepo := roles.NewRepository(db)
+	auditRepo := audit.NewRepository(db)
+	authService := NewService(userRepo, roleRepo, nil, nil, audit.NewService(auditRepo))
+
+	ctx := context.WithValue(context.Background(), userIDContextKey, int64(42))
+	newUser := &users.User{
+		Email:        "alice@example.com",
+		PasswordHash: "password123",
+		Name:         "Alice",
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        INSERT INTO users (email, password_hash, name)
+        VALUES ($1, $2, $3)
+        RETURNING id
+    `)).WithArgs(
+		"alice@example.com",
+		argMatcher(func(value driver.Value) bool {
+			str, ok := value.(string)
+			return ok && str != "" && str != "password123"
+		}),
+		"Alice",
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(123)))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, name, description
+        FROM roles
+        WHERE name = $1
+    `)).WithArgs("SUPER_ADMIN").WillReturnRows(sqlmock.NewRows([]string{"id", "name", "description"}).AddRow(int64(99), "SUPER_ADMIN", "super admin"))
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+        INSERT INTO user_roles (user_id, role_id)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+    `)).WithArgs(int64(123), int64(99)).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        INSERT INTO audit_logs (actor_user_id, action, resource, resource_id, metadata)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+    `)).WithArgs(
+		argMatcher(func(value driver.Value) bool {
+			id, ok := value.(int64)
+			return ok && id == 42
+		}),
+		"user.create",
+		"user",
+		"123",
+		metadataArgMatcher(map[string]string{
+			"email":        "alice@example.com",
+			"name":         "Alice",
+			"initial_role": "SUPER_ADMIN",
+		}, []string{"password", "password_hash", "access_token", "refresh_token"}),
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(55)))
+
+	mock.ExpectCommit()
+
+	id, err := authService.CreateUser(ctx, newUser, "SUPER_ADMIN")
+	if err != nil {
+		t.Fatalf("expected no error creating user, got %v", err)
+	}
+	if id != 123 {
+		t.Fatalf("expected user ID 123, got %d", id)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCreateUser_AuditFailureRollsBack(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	userRepo := users.NewRepository(db)
+	roleRepo := roles.NewRepository(db)
+	auditService := audit.NewService(&failingAuditRepository{})
+	authService := NewService(userRepo, roleRepo, nil, nil, auditService)
+
+	ctx := context.WithValue(context.Background(), userIDContextKey, int64(7))
+	newUser := &users.User{
+		Email:        "bob@example.com",
+		PasswordHash: "password123",
+		Name:         "Bob",
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        INSERT INTO users (email, password_hash, name)
+        VALUES ($1, $2, $3)
+        RETURNING id
+    `)).WithArgs(
+		"bob@example.com",
+		argMatcher(func(value driver.Value) bool {
+			str, ok := value.(string)
+			return ok && str != "" && str != "password123"
+		}),
+		"Bob",
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(124)))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, name, description
+        FROM roles
+        WHERE name = $1
+    `)).WithArgs("SUPER_ADMIN").WillReturnRows(sqlmock.NewRows([]string{"id", "name", "description"}).AddRow(int64(100), "SUPER_ADMIN", "super admin"))
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+        INSERT INTO user_roles (user_id, role_id)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+    `)).WithArgs(int64(124), int64(100)).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	mock.ExpectRollback()
+
+	_, err = authService.CreateUser(ctx, newUser, "SUPER_ADMIN")
+	if err == nil {
+		t.Fatal("expected error when audit fails")
+	}
+	if !errors.Is(err, errAuditFailure) {
+		t.Fatalf("expected audit failure error, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+var errAuditFailure = errors.New("audit failure")
+
+type failingAuditRepository struct{}
+
+func (f *failingAuditRepository) Create(ctx context.Context, auditLog audit.AuditLog) (int64, error) {
+	return 0, errAuditFailure
+}
+
+func (f *failingAuditRepository) CreateWithTx(ctx context.Context, tx *sql.Tx, auditLog audit.AuditLog) (int64, error) {
+	return 0, errAuditFailure
+}
+
+func metadataArgMatcher(expected map[string]string, forbidden []string) argMatcher {
+	return argMatcher(func(value driver.Value) bool {
+		var raw []byte
+		switch v := value.(type) {
+		case []byte:
+			raw = v
+		case string:
+			raw = []byte(v)
+		default:
+			return false
+		}
+
+		var metadata map[string]any
+		if err := json.Unmarshal(raw, &metadata); err != nil {
+			return false
+		}
+
+		for key, expectedValue := range expected {
+			actual, ok := metadata[key]
+			if !ok {
+				return false
+			}
+			actualStr, ok := actual.(string)
+			if !ok || actualStr != expectedValue {
+				return false
+			}
+		}
+
+		for _, key := range forbidden {
+			if _, ok := metadata[key]; ok {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func TestCreateRefreshToken_StoresHashNotPlaintext(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -92,7 +284,7 @@ func TestCreateRefreshToken_StoresHashNotPlaintext(t *testing.T) {
 
 	userRepo := users.NewRepository(db)
 	refreshRepo := NewRefreshTokenRepository(db)
-	authService := NewService(userRepo, nil, nil, refreshRepo)
+	authService := NewService(userRepo, nil, nil, refreshRepo, nil)
 
 	ctx := context.Background()
 
@@ -205,7 +397,7 @@ func TestRefreshAccessToken_ValidRotation(t *testing.T) {
 		timeNow,
 	))
 
-	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db), nil)
 
 	token, newRefreshToken, err := authService.RefreshAccessToken(context.Background(), oldRefreshToken)
 	if err != nil {
@@ -247,7 +439,7 @@ func TestRefreshAccessToken_InvalidTokenNotFound(t *testing.T) {
     `)).WithArgs(hash).WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
 
-	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db), nil)
 
 	_, _, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
 	if err == nil {
@@ -288,7 +480,7 @@ func TestRefreshAccessToken_ExpiredToken(t *testing.T) {
 	))
 	mock.ExpectRollback()
 
-	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db), nil)
 
 	_, _, err = authService.RefreshAccessToken(context.Background(), oldRefreshToken)
 	if err == nil {
@@ -334,7 +526,7 @@ func TestRefreshAccessToken_RevokedToken(t *testing.T) {
     `)).WithArgs(sqlmock.AnyArg(), "family").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db), nil)
 
 	accessToken, newRefreshToken, err := authService.RefreshAccessToken(context.Background(), oldRefreshToken)
 	if err == nil {
@@ -362,7 +554,7 @@ func TestRefreshHandler_MalformedRequest(t *testing.T) {
 	}
 	defer db.Close()
 
-	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db))
+	authService := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db), nil)
 	handler := NewHandler(authService)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewBufferString(`{}`))
