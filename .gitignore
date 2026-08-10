@@ -18,6 +18,7 @@ build
 *.dylib
 *.test
 *.out
+backend/tmp/*
 
 # Environment
 .env
