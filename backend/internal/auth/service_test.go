@@ -20,6 +20,7 @@ import (
 	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/users"
 	"erp-system/backend/pkg/jwt"
+	"erp-system/backend/pkg/password"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -220,6 +221,155 @@ func TestCreateUser_AuditFailureRollsBack(t *testing.T) {
 	}
 	if !errors.Is(err, errAuditFailure) {
 		t.Fatalf("expected audit failure error, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestAuthenticate_AuditRecordedWithActor(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	hashedPassword, err := password.Hash("password123")
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+
+	userRepo := users.NewRepository(db)
+	auditRepo := audit.NewRepository(db)
+	authService := NewService(userRepo, nil, nil, nil, audit.NewService(auditRepo))
+
+	ctx := context.Background()
+	userID := int64(123)
+	email := "alice@example.com"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, email, password_hash, name, created_at, updated_at
+        FROM users
+        WHERE email = $1
+    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+		userID,
+		email,
+		hashedPassword,
+		"Alice",
+		time.Now(),
+		time.Now(),
+	))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT r.name
+        FROM roles r
+        JOIN user_roles ur ON ur.role_id = r.id
+        WHERE ur.user_id = $1
+    `)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("admin"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT DISTINCT p.name
+        FROM permissions p
+        JOIN role_permissions rp ON rp.permission_id = p.id
+        JOIN user_roles ur ON ur.role_id = rp.role_id
+        WHERE ur.user_id = $1
+    `)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("users.read"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        INSERT INTO audit_logs (actor_user_id, action, resource, resource_id, metadata)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+    `)).WithArgs(
+		argMatcher(func(value driver.Value) bool {
+			id, ok := value.(int64)
+			return ok && id == userID
+		}),
+		"auth.login",
+		"user",
+		argMatcher(func(value driver.Value) bool {
+			str, ok := value.(string)
+			return ok && str == fmt.Sprintf("%d", userID)
+		}),
+		metadataArgMatcher(map[string]string{
+			"email": email,
+		}, []string{"password", "password_hash", "access_token", "refresh_token", "Authorization", "jwt"}),
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(77)))
+
+	user, perms, err := authService.Authenticate(ctx, email, "password123")
+	if err != nil {
+		t.Fatalf("expected no error authenticating, got %v", err)
+	}
+	if user == nil {
+		t.Fatal("expected user, got nil")
+	}
+	if user.ID != userID {
+		t.Fatalf("expected user ID %d, got %d", userID, user.ID)
+	}
+	if len(perms) != 1 || perms[0] != "users.read" {
+		t.Fatalf("expected permissions [users.read], got %v", perms)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestAuthenticate_AuditFailureDoesNotFailAuthentication(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	hashedPassword, err := password.Hash("password123")
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+
+	userRepo := users.NewRepository(db)
+	auditService := audit.NewService(&failingAuditRepository{})
+	authService := NewService(userRepo, nil, nil, nil, auditService)
+
+	ctx := context.Background()
+	userID := int64(123)
+	email := "alice@example.com"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, email, password_hash, name, created_at, updated_at
+        FROM users
+        WHERE email = $1
+    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+		userID,
+		email,
+		hashedPassword,
+		"Alice",
+		time.Now(),
+		time.Now(),
+	))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT r.name
+        FROM roles r
+        JOIN user_roles ur ON ur.role_id = r.id
+        WHERE ur.user_id = $1
+    `)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("admin"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT DISTINCT p.name
+        FROM permissions p
+        JOIN role_permissions rp ON rp.permission_id = p.id
+        JOIN user_roles ur ON ur.role_id = rp.role_id
+        WHERE ur.user_id = $1
+    `)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("users.read"))
+
+	user, perms, err := authService.Authenticate(ctx, email, "password123")
+	if err != nil {
+		t.Fatalf("expected authentication to succeed when audit fails, got %v", err)
+	}
+	if user == nil {
+		t.Fatal("expected user, got nil")
+	}
+	if user.ID != userID {
+		t.Fatalf("expected user ID %d, got %d", userID, user.ID)
+	}
+	if len(perms) != 1 || perms[0] != "users.read" {
+		t.Fatalf("expected permissions [users.read], got %v", perms)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
