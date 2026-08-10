@@ -137,6 +137,24 @@ func (s *Service) RefreshAccessToken(ctx context.Context, rawRefreshToken string
 		return "", "", err
 	}
 
+	if s.auditSvc != nil {
+		var actorUserID *int64
+		if userID, ok := UserIDFromContext(ctx); ok {
+			actorUserID = &userID
+		}
+		if _, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{
+			ActorUserID: actorUserID,
+			Action:      "refresh_token.rotate",
+			Resource:    "refresh_token",
+			ResourceID:  &newRefreshToken.FamilyID,
+			Metadata: map[string]any{
+				"user_id": newRefreshToken.UserID,
+			},
+		}); err != nil {
+			return "", "", err
+		}
+	}
+
 	if err = tx.Commit(); err != nil {
 		return "", "", err
 	}

@@ -6,9 +6,10 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -226,6 +227,183 @@ func TestCreateUser_AuditFailureRollsBack(t *testing.T) {
 	}
 }
 
+func TestRefreshAccessToken_AuditRecordedWithActor(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	userRepo := users.NewRepository(db)
+	auditRepo := audit.NewRepository(db)
+	authService := NewService(userRepo, nil, nil, NewRefreshTokenRepository(db), audit.NewService(auditRepo))
+
+	ctx := context.WithValue(context.Background(), userIDContextKey, int64(42))
+	oldRefreshToken := "valid-refresh-token-plain"
+	hash := hashRefreshToken(oldRefreshToken)
+	familyID := "family-1"
+	userID := int64(123)
+	timeNow := time.Now()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
+        FROM refresh_tokens
+        WHERE token_hash = $1
+    `)).WithArgs(hash).WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "family_id", "expires_at", "revoked_at", "created_at"}).AddRow(
+		int64(1),
+		userID,
+	hash,
+		familyID,
+		timeNow.Add(24*time.Hour),
+		nil,
+		timeNow,
+	))
+	mock.ExpectExec(regexp.QuoteMeta(`
+        UPDATE refresh_tokens
+        SET revoked_at = $1
+        WHERE token_hash = $2
+    `)).WithArgs(sqlmock.AnyArg(), hash).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+    `)).WithArgs(
+		userID,
+		argMatcher(func(value driver.Value) bool {
+			str, ok := value.(string)
+			return ok && len(str) == 64 && isHex(str)
+		}),
+		familyID,
+		argMatcher(func(value driver.Value) bool {
+			timeValue, ok := value.(time.Time)
+			if !ok {
+				return false
+			}
+			nowLower := timeNow.Add(RefreshTokenExpiry - 1*time.Minute)
+			nowUpper := timeNow.Add(RefreshTokenExpiry + 1*time.Minute)
+			return timeValue.After(nowLower) && timeValue.Before(nowUpper)
+		}),
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(2)))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        INSERT INTO audit_logs (actor_user_id, action, resource, resource_id, metadata)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+    `)).WithArgs(
+		argMatcher(func(value driver.Value) bool {
+			id, ok := value.(int64)
+			return ok && id == 42
+		}),
+		"refresh_token.rotate",
+		"refresh_token",
+		familyID,
+		metadataArgMatcher(map[string]string{
+			"user_id": "123",
+		}, []string{"password", "password_hash", "access_token", "refresh_token"}),
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(77)))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, email, password_hash, name, created_at, updated_at
+        FROM users
+        WHERE id = $1
+    `)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+		userID,
+		"test@example.com",
+		"hash",
+		"Test User",
+		timeNow,
+		timeNow,
+	))
+
+	token, newRefreshToken, err := authService.RefreshAccessToken(ctx, oldRefreshToken)
+	if err != nil {
+		t.Fatalf("expected no error refreshing access token, got %v", err)
+	}
+	if token == "" {
+		t.Fatal("expected access token")
+	}
+	if newRefreshToken == "" {
+		t.Fatal("expected new refresh token")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRefreshAccessToken_AuditFailureRollsBack(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	userRepo := users.NewRepository(db)
+	auditService := audit.NewService(&failingAuditRepository{})
+	authService := NewService(userRepo, nil, nil, NewRefreshTokenRepository(db), auditService)
+
+	ctx := context.WithValue(context.Background(), userIDContextKey, int64(42))
+	oldRefreshToken := "valid-refresh-token-plain"
+	hash := hashRefreshToken(oldRefreshToken)
+	familyID := "family-1"
+	userID := int64(123)
+	timeNow := time.Now()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
+        FROM refresh_tokens
+        WHERE token_hash = $1
+    `)).WithArgs(hash).WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "family_id", "expires_at", "revoked_at", "created_at"}).AddRow(
+		int64(1),
+		userID,
+	hash,
+		familyID,
+		timeNow.Add(24*time.Hour),
+		nil,
+		timeNow,
+	))
+	mock.ExpectExec(regexp.QuoteMeta(`
+        UPDATE refresh_tokens
+        SET revoked_at = $1
+        WHERE token_hash = $2
+    `)).WithArgs(sqlmock.AnyArg(), hash).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+    `)).WithArgs(
+		userID,
+		argMatcher(func(value driver.Value) bool {
+			str, ok := value.(string)
+			return ok && len(str) == 64 && isHex(str)
+		}),
+		familyID,
+		argMatcher(func(value driver.Value) bool {
+			timeValue, ok := value.(time.Time)
+			if !ok {
+				return false
+			}
+			nowLower := timeNow.Add(RefreshTokenExpiry - 1*time.Minute)
+			nowUpper := timeNow.Add(RefreshTokenExpiry + 1*time.Minute)
+			return timeValue.After(nowLower) && timeValue.Before(nowUpper)
+		}),
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(2)))
+	mock.ExpectRollback()
+
+	_, _, err = authService.RefreshAccessToken(ctx, oldRefreshToken)
+	if err == nil {
+		t.Fatal("expected error when audit fails")
+	}
+	if !errors.Is(err, errAuditFailure) {
+		t.Fatalf("expected audit failure error, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 var errAuditFailure = errors.New("audit failure")
 
 type failingAuditRepository struct{}
@@ -260,8 +438,8 @@ func metadataArgMatcher(expected map[string]string, forbidden []string) argMatch
 			if !ok {
 				return false
 			}
-			actualStr, ok := actual.(string)
-			if !ok || actualStr != expectedValue {
+			actualStr, ok := fmt.Sprintf("%v", actual), true
+			if actualStr != expectedValue {
 				return false
 			}
 		}
