@@ -78,6 +78,24 @@ func (s *Service) CreateRefreshToken(ctx context.Context, userID int64) (string,
 		return "", err
 	}
 
+	if s.auditSvc != nil {
+		var actorUserID *int64
+		if userID, ok := UserIDFromContext(ctx); ok {
+			actorUserID = &userID
+		}
+		if _, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{
+			ActorUserID: actorUserID,
+			Action:      "refresh_token.create",
+			Resource:    "refresh_token",
+			ResourceID:  &refreshToken.FamilyID,
+			Metadata: map[string]any{
+				"user_id": refreshToken.UserID,
+			},
+		}); err != nil {
+			return "", err
+		}
+	}
+
 	if err = tx.Commit(); err != nil {
 		return "", err
 	}
