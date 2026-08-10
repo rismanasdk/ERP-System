@@ -12,6 +12,7 @@ import (
 	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/users"
 	"erp-system/backend/pkg/jwt"
+	"erp-system/backend/pkg/logger"
 	"erp-system/backend/pkg/password"
 )
 
@@ -46,6 +47,22 @@ func (s *Service) Authenticate(ctx context.Context, email, passwordPlain string)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	if s.auditSvc != nil {
+		auditResourceID := fmt.Sprintf("%d", user.ID)
+		if _, err = s.auditSvc.Record(ctx, audit.AuditLog{
+			ActorUserID: &user.ID,
+			Action:      "auth.login",
+			Resource:    "user",
+			ResourceID:  &auditResourceID,
+			Metadata: map[string]any{
+				"email": user.Email,
+			},
+		}); err != nil {
+			logger.Error("failed to record auth.login audit: %v", err)
+		}
+	}
+
 	return user, perms, nil
 }
 
