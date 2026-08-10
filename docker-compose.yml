@@ -8,7 +8,9 @@ services:
       - '5432:5432'
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
     env_file: .env
     depends_on:
       - db

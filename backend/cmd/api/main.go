@@ -1,4 +1,5 @@
 package main
+// hot reload test
 
 import (
 	"fmt"

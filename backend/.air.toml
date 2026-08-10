@@ -1,0 +1,19 @@
+# Air configuration for backend hot reload in development
+root = "."
+
+[build]
+  cmd = "go build -o ./tmp/backend ./cmd/api"
+  bin = "./tmp/backend"
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  exclude_dir = ["tmp", "vendor", ".git"]
+  exclude_ext = ["swp", "tmp"]
+  delay = 100
+
+[log]
+  time = true
+
+[color]
+  main = "yellow"
+  watcher = "cyan"
+  build = "green"
+  runner = "magenta"
