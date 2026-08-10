@@ -1,4 +1,5 @@
 package main
+
 // hot reload test
 
 import (
@@ -10,6 +11,7 @@ import (
 
 	"erp-system/backend/internal/audit"
 	"erp-system/backend/internal/auth"
+	"erp-system/backend/internal/master/products"
 	"erp-system/backend/internal/permissions"
 	"erp-system/backend/internal/realtime"
 	"erp-system/backend/internal/roles"
@@ -66,6 +68,10 @@ func main() {
 	authService := auth.NewService(userRepo, roleRepo, permRepo, refreshRepo, auditService)
 	authHandler := auth.NewHandler(authService)
 
+	productRepo := products.NewRepository(db)
+	productService := products.NewService(productRepo, auditService)
+	productHandler := products.NewHandler(productService)
+
 	authMiddleware := auth.NewMiddleware(authService)
 	realtimeHub := realtime.NewHub()
 	realtimeHandler := realtime.NewHandler(realtimeHub, authService)
@@ -76,6 +82,11 @@ func main() {
 	router.HandleFunc("/api/v1/auth/refresh", authHandler.Refresh).Methods(http.MethodPost)
 	router.Handle("/api/v1/users/protected", authMiddleware.Authenticate(authMiddleware.RequirePermission("users.read")(http.HandlerFunc(protectedUsersHandler)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/ws", authMiddleware.Authenticate(http.HandlerFunc(realtimeHandler.HandleWebSocket))).Methods(http.MethodGet)
+	router.Handle("/api/v1/products", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.read")(http.HandlerFunc(productHandler.List)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/products/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.read")(http.HandlerFunc(productHandler.Get)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/products", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.create")(http.HandlerFunc(productHandler.Create)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/products/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.update")(http.HandlerFunc(productHandler.Update)))).Methods(http.MethodPut)
+	router.Handle("/api/v1/products/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.delete")(http.HandlerFunc(productHandler.Delete)))).Methods(http.MethodDelete)
 
 	log.Printf("Starting backend on port %s", port)
 	if err := http.ListenAndServe(":"+port, router); err != nil {

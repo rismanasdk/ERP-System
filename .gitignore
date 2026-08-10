@@ -39,3 +39,5 @@ db_data/
 # Personal folder & file
 docs/*
 trunk.sh
+.postman/
+postman/
