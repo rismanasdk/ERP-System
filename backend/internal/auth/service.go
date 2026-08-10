@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
+	"erp-system/backend/internal/audit"
 	"erp-system/backend/internal/permissions"
 	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/users"
@@ -18,10 +20,11 @@ type Service struct {
 	roleRepo    *roles.Repository
 	permRepo    *permissions.Repository
 	refreshRepo *RefreshTokenRepository
+	auditSvc    *audit.Service
 }
 
-func NewService(userRepo *users.Repository, roleRepo *roles.Repository, permRepo *permissions.Repository, refreshRepo *RefreshTokenRepository) *Service {
-	return &Service{userRepo: userRepo, roleRepo: roleRepo, permRepo: permRepo, refreshRepo: refreshRepo}
+func NewService(userRepo *users.Repository, roleRepo *roles.Repository, permRepo *permissions.Repository, refreshRepo *RefreshTokenRepository, auditSvc *audit.Service) *Service {
+	return &Service{userRepo: userRepo, roleRepo: roleRepo, permRepo: permRepo, refreshRepo: refreshRepo, auditSvc: auditSvc}
 }
 
 func (s *Service) Authenticate(ctx context.Context, email, passwordPlain string) (*users.User, []string, error) {
@@ -186,6 +189,27 @@ func (s *Service) CreateUser(ctx context.Context, user *users.User, initialRoleN
 			return 0, errors.New("role does not exist")
 		}
 		if err := s.userRepo.AddRoleWithTx(ctx, tx, id, role.ID); err != nil {
+			return 0, err
+		}
+	}
+
+	if s.auditSvc != nil {
+		var actorUserID *int64
+		if userID, ok := UserIDFromContext(ctx); ok {
+			actorUserID = &userID
+		}
+		auditResourceID := fmt.Sprintf("%d", id)
+		if _, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{
+			ActorUserID: actorUserID,
+			Action:      "user.create",
+			Resource:    "user",
+			ResourceID:  &auditResourceID,
+			Metadata: map[string]any{
+				"email":        user.Email,
+				"name":         user.Name,
+				"initial_role": initialRoleName,
+			},
+		}); err != nil {
 			return 0, err
 		}
 	}

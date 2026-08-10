@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"erp-system/backend/internal/audit"
 	"erp-system/backend/internal/auth"
 	"erp-system/backend/internal/bootstrap"
 	"erp-system/backend/internal/permissions"
@@ -70,8 +71,10 @@ func main() {
 	userRepo := users.NewRepository(db)
 	roleRepo := roles.NewRepository(db)
 	permRepo := permissions.NewRepository(db)
+	auditRepo := audit.NewRepository(db)
+	auditService := audit.NewService(auditRepo)
 	refreshRepo := auth.NewRefreshTokenRepository(db)
-	authService := auth.NewService(userRepo, roleRepo, permRepo, refreshRepo)
+	authService := auth.NewService(userRepo, roleRepo, permRepo, refreshRepo, auditService)
 
 	email := strings.TrimSpace(os.Getenv("BOOTSTRAP_ADMIN_EMAIL"))
 	name := strings.TrimSpace(os.Getenv("BOOTSTRAP_ADMIN_NAME"))
