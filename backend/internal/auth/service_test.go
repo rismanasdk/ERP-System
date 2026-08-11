@@ -312,6 +312,100 @@ func TestAuthenticate_AuditRecordedWithActor(t *testing.T) {
 	}
 }
 
+func TestAuthenticate_WrongPasswordFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	hashedPassword, err := password.Hash("password123")
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+
+	userRepo := users.NewRepository(db)
+	authService := NewService(userRepo, nil, nil, nil, nil)
+
+	ctx := context.Background()
+	email := "alice@example.com"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, email, password_hash, name, created_at, updated_at
+        FROM users
+        WHERE email = $1
+    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+		int64(123),
+		email,
+		hashedPassword,
+		"Alice",
+		time.Now(),
+		time.Now(),
+	))
+
+	user, perms, err := authService.Authenticate(ctx, email, "wrong-password")
+	if err == nil {
+		t.Fatal("expected error for wrong password, got nil")
+	}
+	if user != nil {
+		t.Fatalf("expected no user for wrong password, got %+v", user)
+	}
+	if perms != nil {
+		t.Fatalf("expected no permissions for wrong password, got %v", perms)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestAuthenticate_EmptyPasswordFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	hashedPassword, err := password.Hash("password123")
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+
+	userRepo := users.NewRepository(db)
+	authService := NewService(userRepo, nil, nil, nil, nil)
+
+	ctx := context.Background()
+	email := "alice@example.com"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, email, password_hash, name, created_at, updated_at
+        FROM users
+        WHERE email = $1
+    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+		int64(123),
+		email,
+		hashedPassword,
+		"Alice",
+		time.Now(),
+		time.Now(),
+	))
+
+	user, perms, err := authService.Authenticate(ctx, email, "")
+	if err == nil {
+		t.Fatal("expected error for empty password, got nil")
+	}
+	if user != nil {
+		t.Fatalf("expected no user for empty password, got %+v", user)
+	}
+	if perms != nil {
+		t.Fatalf("expected no permissions for empty password, got %v", perms)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestAuthenticate_AuditFailureDoesNotFailAuthentication(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
