@@ -8,6 +8,7 @@ import (
 
 	"erp-system/backend/internal/audit"
 	"erp-system/backend/internal/auth"
+	"erp-system/backend/internal/branches"
 	"erp-system/backend/internal/master/products"
 
 	"github.com/lib/pq"
@@ -16,7 +17,9 @@ import (
 type repository interface {
 	BeginTx(ctx context.Context) (*sql.Tx, error)
 	CreateWithTx(ctx context.Context, tx *sql.Tx, inventory *Inventory) (int64, error)
+	GetByID(ctx context.Context, id int64) (*Inventory, error)
 	GetByProductAndBranchForUpdate(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*Inventory, error)
+	List(ctx context.Context, branchID, productID *int64) ([]Inventory, error)
 	UpdateQuantityWithTx(ctx context.Context, tx *sql.Tx, id, quantity int64) error
 	CreateMovementWithTx(ctx context.Context, tx *sql.Tx, movement *StockMovement) (int64, error)
 }
@@ -27,6 +30,7 @@ type productService interface {
 
 type branchService interface {
 	EnsureUserHasAccess(ctx context.Context, userID, branchID int64, requireActive bool) error
+	ListAccessibleBranches(ctx context.Context, filter branches.BranchFilter, userID int64) ([]branches.Branch, error)
 }
 
 type auditService interface {
@@ -173,7 +177,70 @@ func (s *Service) CreateInventory(ctx context.Context, productID, branchID, quan
 	return id, nil
 }
 
-func (s *Service) AdjustStock(ctx context.Context, productID, branchID int64, movementType string, quantityDelta int64, referenceType *string, referenceID *int64) (int64, error) {
+func (s *Service) GetByID(ctx context.Context, id int64) (*Inventory, error) {
+	inventory, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrInventoryNotFound
+		}
+		return nil, err
+	}
+
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return nil, ErrAuthenticationRequired
+	}
+	if err := s.branchSvc.EnsureUserHasAccess(ctx, userID, inventory.BranchID, true); err != nil {
+		return nil, err
+	}
+	return inventory, nil
+}
+
+func (s *Service) List(ctx context.Context, branchID, productID *int64) ([]Inventory, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return nil, ErrAuthenticationRequired
+	}
+
+	if branchID != nil {
+		if err := s.branchSvc.EnsureUserHasAccess(ctx, userID, *branchID, true); err != nil {
+			return nil, err
+		}
+		return s.repo.List(ctx, branchID, productID)
+	}
+
+	branches, err := s.branchSvc.ListAccessibleBranches(ctx, branches.BranchFilter{}, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(branches) == 0 {
+		return []Inventory{}, nil
+	}
+
+	var inventoryList []Inventory
+	for _, b := range branches {
+		items, err := s.repo.List(ctx, &b.ID, productID)
+		if err != nil {
+			return nil, err
+		}
+		inventoryList = append(inventoryList, items...)
+	}
+	return inventoryList, nil
+}
+
+func (s *Service) AdjustStock(ctx context.Context, inventoryID int64, movementType string, quantityDelta int64, referenceType *string, referenceID *int64) (int64, error) {
+	inventory, err := s.repo.GetByID(ctx, inventoryID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrInventoryNotFound
+		}
+		return 0, err
+	}
+
+	return s.adjustStock(ctx, inventory.ProductID, inventory.BranchID, movementType, quantityDelta, referenceType, referenceID)
+}
+
+func (s *Service) adjustStock(ctx context.Context, productID, branchID int64, movementType string, quantityDelta int64, referenceType *string, referenceID *int64) (int64, error) {
 	userID, ok := auth.UserIDFromContext(ctx)
 	if !ok || userID == 0 {
 		return 0, ErrAuthenticationRequired
@@ -286,7 +353,7 @@ func (s *Service) AdjustStock(ctx context.Context, productID, branchID int64, mo
 	if err = tx.Commit(); err != nil {
 		return 0, err
 	}
- 	return movementID, nil
+	return movementID, nil
 }
 
 func actorUserIDFromContext(ctx context.Context) *int64 {
