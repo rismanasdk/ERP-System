@@ -22,6 +22,8 @@ type fakeInventoryRepo struct {
 	getErr       error
 	updateErr    error
 	movementErr  error
+	listItems    []Inventory
+	listErr      error
 }
 
 func (r *fakeInventoryRepo) BeginTx(ctx context.Context) (*sql.Tx, error) {
@@ -35,6 +37,16 @@ func (r *fakeInventoryRepo) CreateWithTx(ctx context.Context, tx *sql.Tx, invent
 	return 1, nil
 }
 
+func (r *fakeInventoryRepo) GetByID(ctx context.Context, id int64) (*Inventory, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	if r.getInventory == nil {
+		return nil, sql.ErrNoRows
+	}
+	return r.getInventory, nil
+}
+
 func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*Inventory, error) {
 	if r.getErr != nil {
 		return nil, r.getErr
@@ -43,6 +55,10 @@ func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, 
 		return nil, sql.ErrNoRows
 	}
 	return r.getInventory, nil
+}
+
+func (r *fakeInventoryRepo) List(ctx context.Context, branchID, productID *int64) ([]Inventory, error) {
+	return r.listItems, r.listErr
 }
 
 func (r *fakeInventoryRepo) UpdateQuantityWithTx(ctx context.Context, tx *sql.Tx, id, quantity int64) error {
@@ -69,11 +85,17 @@ func (f *fakeProductService) GetByID(ctx context.Context, id int64) (*products.P
 }
 
 type fakeBranchService struct {
-	err error
+	err      error
+	branches []branches.Branch
+	listErr  error
 }
 
 func (f *fakeBranchService) EnsureUserHasAccess(ctx context.Context, userID, branchID int64, requireActive bool) error {
 	return f.err
+}
+
+func (f *fakeBranchService) ListAccessibleBranches(ctx context.Context, filter branches.BranchFilter, userID int64) ([]branches.Branch, error) {
+	return f.branches, f.listErr
 }
 
 type fakeAuthChecker struct {
@@ -240,7 +262,7 @@ func TestAdjustStock_PositiveIncreasesQuantity(t *testing.T) {
 	mock.ExpectCommit()
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	id, err := service.AdjustStock(ctx, 2, 3, MovementTypeIN, 5, nil, nil)
+	id, err := service.AdjustStock(ctx, 1, MovementTypeIN, 5, nil, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -263,7 +285,7 @@ func TestAdjustStock_NegativeWithinStockSucceeds(t *testing.T) {
 	mock.ExpectCommit()
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	_, err := service.AdjustStock(ctx, 2, 3, MovementTypeOUT, -3, nil, nil)
+	_, err := service.AdjustStock(ctx, 1, MovementTypeOUT, -3, nil, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -283,7 +305,7 @@ func TestAdjustStock_ZeroResultSucceeds(t *testing.T) {
 	mock.ExpectCommit()
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	_, err := service.AdjustStock(ctx, 2, 3, MovementTypeOUT, -10, nil, nil)
+	_, err := service.AdjustStock(ctx, 1, MovementTypeOUT, -10, nil, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -303,7 +325,7 @@ func TestAdjustStock_ExceedingStockFails(t *testing.T) {
 	mock.ExpectRollback()
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	_, err := service.AdjustStock(ctx, 2, 3, MovementTypeOUT, -11, nil, nil)
+	_, err := service.AdjustStock(ctx, 1, MovementTypeOUT, -11, nil, nil)
 	if !errors.Is(err, ErrInsufficientStock) {
 		t.Fatalf("expected ErrInsufficientStock, got %v", err)
 	}
@@ -313,48 +335,51 @@ func TestAdjustStock_ExceedingStockFails(t *testing.T) {
 }
 
 func TestAdjustStock_ZeroDeltaValidationError(t *testing.T) {
-	service, _, _, cleanup := newServiceWithTx(t)
+	service, repo, _, cleanup := newServiceWithTx(t)
 	defer cleanup()
 
+	repo.getInventory = &Inventory{ID: 1, ProductID: 2, BranchID: 3, Quantity: 10}
 	service.productSvc = &fakeProductService{product: &products.Product{ID: 2, IsActive: true}}
 	service.branchSvc = &fakeBranchService{err: nil}
 	service.authChecker = &fakeAuthChecker{allowed: true}
 	service.auditSvc = &fakeAuditService{}
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	_, err := service.AdjustStock(ctx, 2, 3, MovementTypeAdjustment, 0, nil, nil)
+	_, err := service.AdjustStock(ctx, 1, MovementTypeAdjustment, 0, nil, nil)
 	if !errors.Is(err, ErrInvalidQuantityDelta) {
 		t.Fatalf("expected ErrInvalidQuantityDelta, got %v", err)
 	}
 }
 
 func TestAdjustStock_InvalidMovementType(t *testing.T) {
-	service, _, _, cleanup := newServiceWithTx(t)
+	service, repo, _, cleanup := newServiceWithTx(t)
 	defer cleanup()
 
+	repo.getInventory = &Inventory{ID: 1, ProductID: 2, BranchID: 3, Quantity: 10}
 	service.productSvc = &fakeProductService{product: &products.Product{ID: 2, IsActive: true}}
 	service.branchSvc = &fakeBranchService{err: nil}
 	service.authChecker = &fakeAuthChecker{allowed: true}
 	service.auditSvc = &fakeAuditService{}
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	_, err := service.AdjustStock(ctx, 2, 3, "PURCHASE", 5, nil, nil)
+	_, err := service.AdjustStock(ctx, 1, "PURCHASE", 5, nil, nil)
 	if !errors.Is(err, ErrInvalidMovementType) {
 		t.Fatalf("expected ErrInvalidMovementType, got %v", err)
 	}
 }
 
 func TestAdjustStock_InvalidINDelta(t *testing.T) {
-	service, _, _, cleanup := newServiceWithTx(t)
+	service, repo, _, cleanup := newServiceWithTx(t)
 	defer cleanup()
 
+	repo.getInventory = &Inventory{ID: 1, ProductID: 2, BranchID: 3, Quantity: 10}
 	service.productSvc = &fakeProductService{product: &products.Product{ID: 2, IsActive: true}}
 	service.branchSvc = &fakeBranchService{err: nil}
 	service.authChecker = &fakeAuthChecker{allowed: true}
 	service.auditSvc = &fakeAuditService{}
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	_, err := service.AdjustStock(ctx, 2, 3, MovementTypeIN, -5, nil, nil)
+	_, err := service.AdjustStock(ctx, 1, MovementTypeIN, -5, nil, nil)
 	var validationErr *ValidationError
 	if !errors.As(err, &validationErr) {
 		t.Fatalf("expected ValidationError, got %v", err)
@@ -362,16 +387,17 @@ func TestAdjustStock_InvalidINDelta(t *testing.T) {
 }
 
 func TestAdjustStock_InvalidOUTDelta(t *testing.T) {
-	service, _, _, cleanup := newServiceWithTx(t)
+	service, repo, _, cleanup := newServiceWithTx(t)
 	defer cleanup()
 
+	repo.getInventory = &Inventory{ID: 1, ProductID: 2, BranchID: 3, Quantity: 10}
 	service.productSvc = &fakeProductService{product: &products.Product{ID: 2, IsActive: true}}
 	service.branchSvc = &fakeBranchService{err: nil}
 	service.authChecker = &fakeAuthChecker{allowed: true}
 	service.auditSvc = &fakeAuditService{}
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	_, err := service.AdjustStock(ctx, 2, 3, MovementTypeOUT, 5, nil, nil)
+	_, err := service.AdjustStock(ctx, 1, MovementTypeOUT, 5, nil, nil)
 	var validationErr *ValidationError
 	if !errors.As(err, &validationErr) {
 		t.Fatalf("expected ValidationError, got %v", err)
@@ -393,7 +419,7 @@ func TestAdjustStock_MovementInsertFailureRollsBack(t *testing.T) {
 	mock.ExpectRollback()
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	_, err := service.AdjustStock(ctx, 2, 3, MovementTypeIN, 5, nil, nil)
+	_, err := service.AdjustStock(ctx, 1, MovementTypeIN, 5, nil, nil)
 	if err == nil || err.Error() != "insert failed" {
 		t.Fatalf("expected insert failed error, got %v", err)
 	}
@@ -416,7 +442,7 @@ func TestAdjustStock_AuditInsertFailureRollsBack(t *testing.T) {
 	mock.ExpectRollback()
 
 	ctx := auth.ContextWithUserID(context.Background(), 10)
-	_, err := service.AdjustStock(ctx, 2, 3, MovementTypeIN, 5, nil, nil)
+	_, err := service.AdjustStock(ctx, 1, MovementTypeIN, 5, nil, nil)
 	if err == nil || err.Error() != "audit failed" {
 		t.Fatalf("expected audit failed error, got %v", err)
 	}
