@@ -11,6 +11,7 @@ import (
 
 	"erp-system/backend/internal/audit"
 	"erp-system/backend/internal/auth"
+	"erp-system/backend/internal/branches"
 	"erp-system/backend/internal/master/products"
 	"erp-system/backend/internal/permissions"
 	"erp-system/backend/internal/realtime"
@@ -68,6 +69,10 @@ func main() {
 	authService := auth.NewService(userRepo, roleRepo, permRepo, refreshRepo, auditService)
 	authHandler := auth.NewHandler(authService)
 
+	branchRepo := branches.NewRepository(db)
+	branchService := branches.NewService(branchRepo, authService, auditService)
+	branchHandler := branches.NewHandler(branchService)
+
 	productRepo := products.NewRepository(db)
 	productService := products.NewService(productRepo, auditService)
 	productHandler := products.NewHandler(productService)
@@ -82,6 +87,10 @@ func main() {
 	router.HandleFunc("/api/v1/auth/refresh", authHandler.Refresh).Methods(http.MethodPost)
 	router.Handle("/api/v1/users/protected", authMiddleware.Authenticate(authMiddleware.RequirePermission("users.read")(http.HandlerFunc(protectedUsersHandler)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/ws", authMiddleware.Authenticate(http.HandlerFunc(realtimeHandler.HandleWebSocket))).Methods(http.MethodGet)
+	router.Handle("/api/v1/branches", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.read")(http.HandlerFunc(branchHandler.List)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/branches/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.read")(http.HandlerFunc(branchHandler.Get)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/branches", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.create")(http.HandlerFunc(branchHandler.Create)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/branches/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.adjust")(http.HandlerFunc(branchHandler.Update)))).Methods(http.MethodPut)
 	router.Handle("/api/v1/products", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.read")(http.HandlerFunc(productHandler.List)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/products/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.read")(http.HandlerFunc(productHandler.Get)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/products", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.create")(http.HandlerFunc(productHandler.Create)))).Methods(http.MethodPost)
