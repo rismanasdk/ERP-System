@@ -27,6 +27,10 @@ func UserIDFromContext(ctx context.Context) (int64, bool) {
 	return userID, ok
 }
 
+func ContextWithUserID(ctx context.Context, userID int64) context.Context {
+	return context.WithValue(ctx, userIDContextKey, userID)
+}
+
 func IdentityFromContext(ctx context.Context) (*Identity, bool) {
 	identity, ok := ctx.Value(identityContextKey).(*Identity)
 	return identity, ok

@@ -1,11 +1,13 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
+	"erp-system/backend/internal/users"
 	"erp-system/backend/pkg/jwt"
 	"erp-system/backend/pkg/response"
 )
@@ -30,11 +32,17 @@ type RefreshResponse struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-type Handler struct {
-	authService *Service
+type AuthService interface {
+	Authenticate(ctx context.Context, email, passwordPlain string) (*users.User, []string, error)
+	CreateRefreshToken(ctx context.Context, userID int64) (string, error)
+	RefreshAccessToken(ctx context.Context, rawRefreshToken string) (string, string, error)
 }
 
-func NewHandler(authService *Service) *Handler {
+type Handler struct {
+	authService AuthService
+}
+
+func NewHandler(authService AuthService) *Handler {
 	return &Handler{authService: authService}
 }
 
