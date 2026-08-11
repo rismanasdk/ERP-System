@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"erp-system/backend/internal/branches"
 	"erp-system/backend/pkg/response"
 
 	"github.com/gorilla/mux"
@@ -165,6 +166,12 @@ func handleServiceError(w http.ResponseWriter, err error, message string) {
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	case errors.Is(err, ErrInsufficientStock):
 		response.JSONError(w, http.StatusConflict, response.NewAPIError(http.StatusConflict, "CONFLICT", "insufficient stock"))
+	case errors.Is(err, branches.ErrBranchAccessDenied):
+		response.JSONError(w, http.StatusForbidden, response.NewAPIError(http.StatusForbidden, "FORBIDDEN", "branch access denied"))
+	case errors.Is(err, branches.ErrBranchNotFound):
+		response.JSONError(w, http.StatusNotFound, response.NewAPIError(http.StatusNotFound, "NOT_FOUND", "branch not found"))
+	case errors.Is(err, branches.ErrBranchInactive):
+		response.JSONError(w, http.StatusForbidden, response.NewAPIError(http.StatusForbidden, "FORBIDDEN", "branch is inactive"))
 	case errors.Is(err, ErrInventoryConflict):
 		response.JSONError(w, http.StatusConflict, response.NewAPIError(http.StatusConflict, "CONFLICT", "inventory already exists for product and branch"))
 	default:
