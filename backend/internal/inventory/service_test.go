@@ -16,14 +16,15 @@ import (
 )
 
 type fakeInventoryRepo struct {
-	db           *sql.DB
-	createErr    error
-	getInventory *Inventory
-	getErr       error
-	updateErr    error
-	movementErr  error
-	listItems    []Inventory
-	listErr      error
+	db                *sql.DB
+	createErr         error
+	getInventory      *Inventory
+	getErr            error
+	updateErr         error
+	movementErr       error
+	listItems         []Inventory
+	listItemsByBranch map[int64][]Inventory
+	listErr           error
 }
 
 func (r *fakeInventoryRepo) BeginTx(ctx context.Context) (*sql.Tx, error) {
@@ -58,7 +59,23 @@ func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, 
 }
 
 func (r *fakeInventoryRepo) List(ctx context.Context, branchID, productID *int64) ([]Inventory, error) {
-	return r.listItems, r.listErr
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	if branchID == nil {
+		if len(r.listItemsByBranch) > 0 {
+			var items []Inventory
+			for _, branchItems := range r.listItemsByBranch {
+				items = append(items, branchItems...)
+			}
+			return items, nil
+		}
+		return r.listItems, nil
+	}
+	if items, ok := r.listItemsByBranch[*branchID]; ok {
+		return items, nil
+	}
+	return nil, nil
 }
 
 func (r *fakeInventoryRepo) UpdateQuantityWithTx(ctx context.Context, tx *sql.Tx, id, quantity int64) error {
@@ -136,7 +153,6 @@ func TestCreateInventory_Success(t *testing.T) {
 	service, repo, mock, cleanup := newServiceWithTx(t)
 	defer cleanup()
 
-	repo.db = repo.db
 	repo.createErr = nil
 
 	service.productSvc = &fakeProductService{product: &products.Product{ID: 2, IsActive: true}}

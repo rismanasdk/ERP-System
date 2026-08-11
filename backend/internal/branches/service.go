@@ -113,6 +113,17 @@ func (s *Service) List(ctx context.Context, filter BranchFilter) ([]Branch, erro
 	return s.repo.ListAccessibleBranches(ctx, filter, userID)
 }
 
+func (s *Service) ListAccessibleBranches(ctx context.Context, filter BranchFilter, userID int64) ([]Branch, error) {
+	isSuperAdmin, err := s.isSuperAdmin(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if isSuperAdmin {
+		return s.repo.List(ctx, filter)
+	}
+	return s.repo.ListAccessibleBranches(ctx, filter, userID)
+}
+
 func (s *Service) GetByID(ctx context.Context, id int64) (*Branch, error) {
 	userID, ok := auth.UserIDFromContext(ctx)
 	if !ok || userID == 0 {
@@ -242,6 +253,13 @@ func (s *Service) EnsureUserHasAccess(ctx context.Context, userID, branchID int6
 	}
 	if requireActive && !branch.IsActive {
 		return ErrBranchInactive
+	}
+	isSuperAdmin, err := s.isSuperAdmin(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if isSuperAdmin {
+		return nil
 	}
 	allowed, err := s.repo.UserHasAccess(ctx, userID, branchID)
 	if err != nil {

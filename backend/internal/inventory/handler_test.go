@@ -14,14 +14,16 @@ import (
 )
 
 type fakeInventoryService struct {
-	createID  int64
-	createErr error
-	adjustID  int64
-	adjustErr error
-	listItems []Inventory
-	listErr   error
-	getItem   *Inventory
-	getErr    error
+	createID      int64
+	createErr     error
+	adjustID      int64
+	adjustErr     error
+	listItems     []Inventory
+	listErr       error
+	lastBranchID  *int64
+	lastProductID *int64
+	getItem       *Inventory
+	getErr        error
 }
 
 func (s *fakeInventoryService) CreateInventory(ctx context.Context, productID, branchID, quantity int64) (int64, error) {
@@ -33,6 +35,8 @@ func (s *fakeInventoryService) AdjustStock(ctx context.Context, inventoryID int6
 }
 
 func (s *fakeInventoryService) List(ctx context.Context, branchID, productID *int64) ([]Inventory, error) {
+	s.lastBranchID = branchID
+	s.lastProductID = productID
 	return s.listItems, s.listErr
 }
 
