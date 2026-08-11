@@ -24,6 +24,8 @@ type Service struct {
 	auditSvc    *audit.Service
 }
 
+var ErrInvalidCredentials = errors.New("invalid credentials")
+
 func NewService(userRepo *users.Repository, roleRepo *roles.Repository, permRepo *permissions.Repository, refreshRepo *RefreshTokenRepository, auditSvc *audit.Service) *Service {
 	return &Service{userRepo: userRepo, roleRepo: roleRepo, permRepo: permRepo, refreshRepo: refreshRepo, auditSvc: auditSvc}
 }
@@ -34,7 +36,7 @@ func (s *Service) Authenticate(ctx context.Context, email, passwordPlain string)
 		return nil, nil, err
 	}
 	if err := password.Compare(user.PasswordHash, passwordPlain); err != nil {
-		return nil, nil, errors.New("invalid credentials")
+		return nil, nil, ErrInvalidCredentials
 	}
 
 	roles, err := s.userRepo.GetRoleNames(ctx, user.ID)
