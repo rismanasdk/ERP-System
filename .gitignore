@@ -42,3 +42,4 @@ trunk.sh
 .postman/
 postman/
 fix_dbclient.py
+migration.sh

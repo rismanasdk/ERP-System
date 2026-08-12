@@ -23,6 +23,8 @@ type fakePurchasingService struct {
 	lastFilter   PurchaseFilter
 	purchase     *Purchase
 	getErr       error
+	completeErr  error
+	cancelErr    error
 }
 
 func (s *fakePurchasingService) CreatePurchase(ctx context.Context, input CreatePurchaseInput) (int64, error) {
@@ -37,6 +39,14 @@ func (s *fakePurchasingService) ListPurchases(ctx context.Context, filter Purcha
 
 func (s *fakePurchasingService) GetPurchase(ctx context.Context, id int64) (*Purchase, error) {
 	return s.purchase, s.getErr
+}
+
+func (s *fakePurchasingService) CompletePurchase(ctx context.Context, purchaseID int64) error {
+	return s.completeErr
+}
+
+func (s *fakePurchasingService) CancelPurchase(ctx context.Context, purchaseID int64) error {
+	return s.cancelErr
 }
 
 func TestPurchaseHandler_Create_InvalidBody(t *testing.T) {
@@ -193,6 +203,219 @@ func TestPurchaseHandler_List_BranchAccessDenied(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	handler.List(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", w.Code)
+	}
+}
+
+func TestPurchaseHandler_Complete_InvalidPurchaseID(t *testing.T) {
+	service := &fakePurchasingService{}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/abc/complete", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "abc"})
+	w := httptest.NewRecorder()
+
+	handler.Complete(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+	if got := w.Body.String(); got != `{"error":{"code":"INVALID_REQUEST","message":"invalid purchase id"}}`+"\n" {
+		t.Fatalf("unexpected body: %s", got)
+	}
+}
+
+func TestPurchaseHandler_Complete_Success(t *testing.T) {
+	service := &fakePurchasingService{}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/complete", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Complete(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp response.SuccessResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected response data type: %T", resp.Data)
+	}
+	if id, ok := data["id"].(float64); !ok || int64(id) != 7 {
+		t.Fatalf("expected id 7, got %v", data["id"])
+	}
+	if status, ok := data["status"].(string); !ok || status != PurchaseStatusCompleted {
+		t.Fatalf("expected status %s, got %v", PurchaseStatusCompleted, data["status"])
+	}
+}
+
+func TestPurchaseHandler_Complete_Forbidden(t *testing.T) {
+	service := &fakePurchasingService{completeErr: ErrForbidden}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/complete", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Complete(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", w.Code)
+	}
+}
+
+func TestPurchaseHandler_Complete_Unauthorized(t *testing.T) {
+	service := &fakePurchasingService{completeErr: ErrAuthenticationRequired}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/complete", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Complete(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", w.Code)
+	}
+}
+
+func TestPurchaseHandler_Cancel_InvalidPurchaseID(t *testing.T) {
+	service := &fakePurchasingService{}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/abc/cancel", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "abc"})
+	w := httptest.NewRecorder()
+
+	handler.Cancel(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestPurchaseHandler_Cancel_Success(t *testing.T) {
+	service := &fakePurchasingService{}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/cancel", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Cancel(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp response.SuccessResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected response data type: %T", resp.Data)
+	}
+	if id, ok := data["id"].(float64); !ok || int64(id) != 7 {
+		t.Fatalf("expected id 7, got %v", data["id"])
+	}
+	if status, ok := data["status"].(string); !ok || status != PurchaseStatusCancelled {
+		t.Fatalf("expected status %s, got %v", PurchaseStatusCancelled, data["status"])
+	}
+}
+
+func TestPurchaseHandler_Cancel_Forbidden(t *testing.T) {
+	service := &fakePurchasingService{cancelErr: ErrForbidden}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/cancel", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Cancel(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", w.Code)
+	}
+}
+
+func TestPurchaseHandler_Cancel_Unauthorized(t *testing.T) {
+	service := &fakePurchasingService{cancelErr: ErrAuthenticationRequired}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/cancel", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Cancel(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", w.Code)
+	}
+}
+
+func TestPurchaseHandler_Complete_InvalidTransition(t *testing.T) {
+	service := &fakePurchasingService{completeErr: ErrInvalidPurchaseTransition}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/complete", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Complete(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestPurchaseHandler_Cancel_InvalidTransition(t *testing.T) {
+	service := &fakePurchasingService{cancelErr: ErrInvalidPurchaseTransition}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/cancel", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Cancel(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestPurchaseHandler_Complete_BranchAccessDenied(t *testing.T) {
+	service := &fakePurchasingService{completeErr: branches.ErrBranchAccessDenied}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/complete", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Complete(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", w.Code)
+	}
+}
+
+func TestPurchaseHandler_Cancel_BranchAccessDenied(t *testing.T) {
+	service := &fakePurchasingService{cancelErr: branches.ErrBranchAccessDenied}
+	handler := NewHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchases/7/cancel", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "7"})
+	w := httptest.NewRecorder()
+
+	handler.Cancel(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected status 403, got %d", w.Code)
