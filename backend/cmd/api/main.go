@@ -15,6 +15,7 @@ import (
 	"erp-system/backend/internal/inventory"
 	"erp-system/backend/internal/master/products"
 	"erp-system/backend/internal/permissions"
+	"erp-system/backend/internal/purchasing"
 	"erp-system/backend/internal/realtime"
 	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/users"
@@ -82,6 +83,10 @@ func main() {
 	inventoryService := inventory.NewService(inventoryRepo, productService, branchService, authService, auditService)
 	inventoryHandler := inventory.NewHandler(inventoryService)
 
+	purchaseRepo := purchasing.NewRepository(db)
+	purchaseService := purchasing.NewService(purchaseRepo, inventoryRepo, productService, branchService, authService, auditService)
+	purchaseHandler := purchasing.NewHandler(purchaseService)
+
 	authMiddleware := auth.NewMiddleware(authService)
 	realtimeHub := realtime.NewHub()
 	realtimeHandler := realtime.NewHandler(realtimeHub, authService)
@@ -97,6 +102,7 @@ func main() {
 	router.Handle("/api/v1/branches", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.create")(http.HandlerFunc(branchHandler.Create)))).Methods(http.MethodPost)
 	router.Handle("/api/v1/branches/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.adjust")(http.HandlerFunc(branchHandler.Update)))).Methods(http.MethodPut)
 	registerInventoryRoutes(router, authMiddleware, inventoryHandler)
+	registerPurchasingRoutes(router, authMiddleware, purchaseHandler)
 	router.Handle("/api/v1/products", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.read")(http.HandlerFunc(productHandler.List)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/products/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.read")(http.HandlerFunc(productHandler.Get)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/products", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.create")(http.HandlerFunc(productHandler.Create)))).Methods(http.MethodPost)
@@ -122,4 +128,10 @@ func registerInventoryRoutes(router *mux.Router, middleware *auth.Middleware, ha
 	router.Handle("/api/v1/inventory/{id}", middleware.Authenticate(middleware.RequirePermission("inventory.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/inventory", middleware.Authenticate(middleware.RequirePermission("inventory.create")(http.HandlerFunc(handler.Create)))).Methods(http.MethodPost)
 	router.Handle("/api/v1/inventory/{id}/adjust", middleware.Authenticate(middleware.RequirePermission("inventory.adjust")(http.HandlerFunc(handler.Adjust)))).Methods(http.MethodPost)
+}
+
+func registerPurchasingRoutes(router *mux.Router, middleware *auth.Middleware, handler *purchasing.Handler) {
+	router.Handle("/api/v1/purchases", middleware.Authenticate(middleware.RequirePermission("purchases.create")(http.HandlerFunc(handler.Create)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/purchases", middleware.Authenticate(middleware.RequirePermission("purchases.read")(http.HandlerFunc(handler.List)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/purchases/{id}", middleware.Authenticate(middleware.RequirePermission("purchases.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
 }

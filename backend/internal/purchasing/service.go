@@ -58,6 +58,7 @@ type Service struct {
 
 const (
 	PurchaseCreatePermission   = "purchases.create"
+	PurchaseReadPermission     = "purchases.read"
 	PurchaseStatusCompleted    = "COMPLETED"
 	purchaseNumberRetryLimit   = 3
 	purchaseNumberRandomPrefix = 8
