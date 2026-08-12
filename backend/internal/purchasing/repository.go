@@ -388,3 +388,82 @@ func (r *Repository) ListPurchaseItemsByPurchaseID(ctx context.Context, purchase
 	}
 	return items, nil
 }
+
+func (r *Repository) GetPurchaseByIDForUpdate(ctx context.Context, tx *sql.Tx, id int64) (*Purchase, error) {
+	purchase := &Purchase{}
+	err := tx.QueryRowContext(ctx, `
+        SELECT id, branch_id, supplier_id, purchase_number, status, total_amount, notes, created_by, created_at, updated_at
+        FROM purchases
+        WHERE id = $1
+        FOR UPDATE
+    `, id).Scan(
+		&purchase.ID,
+		&purchase.BranchID,
+		&purchase.SupplierID,
+		&purchase.PurchaseNumber,
+		&purchase.Status,
+		&purchase.TotalAmount,
+		&purchase.Notes,
+		&purchase.CreatedBy,
+		&purchase.CreatedAt,
+		&purchase.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return purchase, nil
+}
+
+func (r *Repository) ListPurchaseItemsByPurchaseIDWithTx(ctx context.Context, tx *sql.Tx, purchaseID int64) ([]PurchaseItem, error) {
+	rows, err := tx.QueryContext(ctx, `
+        SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, created_at, updated_at
+        FROM purchase_items
+        WHERE purchase_id = $1
+        ORDER BY id ASC
+    `, purchaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []PurchaseItem
+	for rows.Next() {
+		var item PurchaseItem
+		if err := rows.Scan(
+			&item.ID,
+			&item.PurchaseID,
+			&item.ProductID,
+			&item.Quantity,
+			&item.UnitCost,
+			&item.Subtotal,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *Repository) UpdatePurchaseStatusWithTx(ctx context.Context, tx *sql.Tx, id int64, status string) error {
+	res, err := tx.ExecContext(ctx, `
+        UPDATE purchases
+        SET status = $1, updated_at = NOW()
+        WHERE id = $2
+    `, status, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}

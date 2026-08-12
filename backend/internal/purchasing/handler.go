@@ -21,6 +21,8 @@ type PurchasingService interface {
 	CreatePurchase(ctx context.Context, input CreatePurchaseInput) (int64, error)
 	ListPurchases(ctx context.Context, filter PurchaseFilter) ([]Purchase, error)
 	GetPurchase(ctx context.Context, id int64) (*Purchase, error)
+	CompletePurchase(ctx context.Context, purchaseID int64) error
+	CancelPurchase(ctx context.Context, purchaseID int64) error
 }
 
 func NewHandler(service PurchasingService) *Handler {
@@ -111,6 +113,36 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	response.JSONOK(w, purchase)
 }
 
+func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePurchaseID(r)
+	if err != nil {
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid purchase id"))
+		return
+	}
+
+	if err := h.service.CompletePurchase(r.Context(), id); err != nil {
+		h.handleServiceError(w, err, "failed to complete purchase")
+		return
+	}
+
+	response.JSONOK(w, map[string]any{"id": id, "status": PurchaseStatusCompleted})
+}
+
+func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePurchaseID(r)
+	if err != nil {
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid purchase id"))
+		return
+	}
+
+	if err := h.service.CancelPurchase(r.Context(), id); err != nil {
+		h.handleServiceError(w, err, "failed to cancel purchase")
+		return
+	}
+
+	response.JSONOK(w, map[string]any{"id": id, "status": PurchaseStatusCancelled})
+}
+
 func parsePurchaseID(r *http.Request) (int64, error) {
 	vars := mux.Vars(r)
 	rawID, ok := vars["id"]
@@ -138,6 +170,8 @@ func (h *Handler) handleServiceError(w http.ResponseWriter, err error, message s
 		response.JSONError(w, http.StatusNotFound, response.NewAPIError(http.StatusNotFound, "NOT_FOUND", "branch not found"))
 	case errors.Is(err, branches.ErrBranchInactive):
 		response.JSONError(w, http.StatusForbidden, response.NewAPIError(http.StatusForbidden, "FORBIDDEN", "branch is inactive"))
+	case errors.Is(err, ErrPurchaseAlreadyCompleted), errors.Is(err, ErrCannotCompleteCancelled), errors.Is(err, ErrPurchaseAlreadyCancelled), errors.Is(err, ErrPurchaseHasNoItems), errors.Is(err, ErrInsufficientStock), errors.Is(err, ErrInvalidPurchaseTransition):
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	default:
 		var validationErr *ValidationError
 		if errors.As(err, &validationErr) {

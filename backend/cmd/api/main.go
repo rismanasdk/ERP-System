@@ -134,4 +134,6 @@ func registerPurchasingRoutes(router *mux.Router, middleware *auth.Middleware, h
 	router.Handle("/api/v1/purchases", middleware.Authenticate(middleware.RequirePermission("purchases.create")(http.HandlerFunc(handler.Create)))).Methods(http.MethodPost)
 	router.Handle("/api/v1/purchases", middleware.Authenticate(middleware.RequirePermission("purchases.read")(http.HandlerFunc(handler.List)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/purchases/{id}", middleware.Authenticate(middleware.RequirePermission("purchases.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/purchases/{id}/complete", middleware.Authenticate(middleware.RequirePermission(purchasing.PurchaseCompletePermission)(http.HandlerFunc(handler.Complete)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/purchases/{id}/cancel", middleware.Authenticate(middleware.RequirePermission(purchasing.PurchaseCancelPermission)(http.HandlerFunc(handler.Cancel)))).Methods(http.MethodPost)
 }

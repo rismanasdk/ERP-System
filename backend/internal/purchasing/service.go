@@ -44,6 +44,9 @@ type repositoryInterface interface {
 	CreatePurchaseItemWithTx(ctx context.Context, tx *sql.Tx, item *PurchaseItem) (int64, error)
 	GetSupplierByID(ctx context.Context, id int64) (*Supplier, error)
 	GetPurchaseByID(ctx context.Context, id int64) (*Purchase, error)
+	GetPurchaseByIDForUpdate(ctx context.Context, tx *sql.Tx, id int64) (*Purchase, error)
+	ListPurchaseItemsByPurchaseIDWithTx(ctx context.Context, tx *sql.Tx, purchaseID int64) ([]PurchaseItem, error)
+	UpdatePurchaseStatusWithTx(ctx context.Context, tx *sql.Tx, id int64, status string) error
 	ListPurchases(ctx context.Context, filter PurchaseFilter) ([]Purchase, error)
 }
 
@@ -59,20 +62,31 @@ type Service struct {
 const (
 	PurchaseCreatePermission   = "purchases.create"
 	PurchaseReadPermission     = "purchases.read"
+	PurchaseCompletePermission = "purchases.complete"
+	PurchaseCancelPermission   = "purchases.cancel"
+	PurchaseStatusDraft        = "DRAFT"
 	PurchaseStatusCompleted    = "COMPLETED"
+	PurchaseStatusCancelled    = "CANCELLED"
 	purchaseNumberRetryLimit   = 3
 	purchaseNumberRandomPrefix = 8
 )
 
 var (
-	ErrAuthenticationRequired = errors.New("authentication required")
-	ErrForbidden              = errors.New("permission denied")
-	ErrPurchaseNotFound       = errors.New("purchase not found")
-	ErrSupplierNotFound       = errors.New("supplier not found")
-	ErrSupplierInactive       = errors.New("supplier is inactive")
-	ErrProductNotFound        = errors.New("product not found")
-	ErrProductInactive        = errors.New("product is inactive")
-	ErrDuplicateProduct       = errors.New("duplicate product in purchase items")
+	ErrAuthenticationRequired    = errors.New("authentication required")
+	ErrForbidden                 = errors.New("permission denied")
+	ErrPurchaseNotFound          = errors.New("purchase not found")
+	ErrSupplierNotFound          = errors.New("supplier not found")
+	ErrSupplierInactive          = errors.New("supplier is inactive")
+	ErrProductNotFound           = errors.New("product not found")
+	ErrProductInactive           = errors.New("product is inactive")
+	ErrDuplicateProduct          = errors.New("duplicate product in purchase items")
+	ErrPurchaseAlreadyCompleted  = errors.New("purchase already completed")
+	ErrPurchaseAlreadyCancelled  = errors.New("purchase already cancelled")
+	ErrCannotCompleteCancelled   = errors.New("cannot complete cancelled purchase")
+	ErrPurchaseNotDraft          = errors.New("purchase must be in draft status")
+	ErrPurchaseHasNoItems        = errors.New("purchase has no items")
+	ErrInsufficientStock         = errors.New("insufficient stock")
+	ErrInvalidPurchaseTransition = errors.New("invalid purchase status transition")
 )
 
 type ValidationError struct {
@@ -198,7 +212,7 @@ func (s *Service) CreatePurchase(ctx context.Context, input CreatePurchaseInput)
 		BranchID:       input.BranchID,
 		SupplierID:     input.SupplierID,
 		PurchaseNumber: purchaseNumber,
-		Status:         PurchaseStatusCompleted,
+		Status:         PurchaseStatusDraft,
 		TotalAmount:    totalAmount,
 		Notes:          input.Notes,
 		CreatedBy:      userID,
@@ -212,43 +226,6 @@ func (s *Service) CreatePurchase(ctx context.Context, input CreatePurchaseInput)
 	for _, item := range items {
 		item.PurchaseID = purchaseID
 		if _, err = s.repo.CreatePurchaseItemWithTx(ctx, tx, &item); err != nil {
-			return 0, err
-		}
-
-		inventoryRow, invErr := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, input.BranchID)
-		if invErr != nil {
-			if errors.Is(invErr, sql.ErrNoRows) {
-				_, err = s.inventoryRepo.CreateWithTx(ctx, tx, &inventory.Inventory{ProductID: item.ProductID, BranchID: input.BranchID, Quantity: item.Quantity})
-				if err != nil {
-					return 0, err
-				}
-			} else {
-				return 0, invErr
-			}
-		}
-		if inventoryRow != nil {
-			newQuantity := inventoryRow.Quantity + item.Quantity
-			if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, newQuantity); err != nil {
-				return 0, err
-			}
-		}
-
-		movement := &inventory.StockMovement{
-			ProductID:     item.ProductID,
-			BranchID:      input.BranchID,
-			MovementType:  inventory.MovementTypeIN,
-			QuantityDelta: item.Quantity,
-			ReferenceType: inventory.PtrString("purchase"),
-			ReferenceID:   inventory.PtrInt64(purchaseID),
-			ActorUserID:   actorUserIDFromContext(ctx),
-			Metadata: map[string]any{
-				"purchase_number": purchase.PurchaseNumber,
-				"branch_id":       input.BranchID,
-				"product_id":      item.ProductID,
-				"supplier_id":     input.SupplierID,
-			},
-		}
-		if _, err = s.inventoryRepo.CreateMovementWithTx(ctx, tx, movement); err != nil {
 			return 0, err
 		}
 	}
@@ -314,6 +291,270 @@ func (s *Service) GetPurchase(ctx context.Context, id int64) (*Purchase, error) 
 		return nil, err
 	}
 	return purchase, nil
+}
+
+func (s *Service) CompletePurchase(ctx context.Context, purchaseID int64) (err error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return ErrAuthenticationRequired
+	}
+
+	allowed, err := s.authChecker.HasPermission(ctx, userID, PurchaseCompletePermission)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbidden
+	}
+
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	purchase, err := s.repo.GetPurchaseByIDForUpdate(ctx, tx, purchaseID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrPurchaseNotFound
+		}
+		return err
+	}
+
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, purchase.BranchID, true); err != nil {
+		return err
+	}
+
+	switch purchase.Status {
+	case PurchaseStatusDraft:
+		// allowed
+	case PurchaseStatusCompleted:
+		return ErrPurchaseAlreadyCompleted
+	case PurchaseStatusCancelled:
+		return ErrCannotCompleteCancelled
+	default:
+		return ErrInvalidPurchaseTransition
+	}
+
+	items, err := s.repo.ListPurchaseItemsByPurchaseIDWithTx(ctx, tx, purchaseID)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return ErrPurchaseHasNoItems
+	}
+
+	for _, item := range items {
+		product, err := s.productSvc.GetByID(ctx, item.ProductID)
+		if err != nil {
+			if errors.Is(err, products.ErrProductNotFound) {
+				return ErrProductNotFound
+			}
+			return err
+		}
+		if !product.IsActive {
+			return ErrProductInactive
+		}
+
+		inventoryRow, invErr := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, purchase.BranchID)
+		if invErr != nil {
+			if errors.Is(invErr, sql.ErrNoRows) {
+				_, err = s.inventoryRepo.CreateWithTx(ctx, tx, &inventory.Inventory{ProductID: item.ProductID, BranchID: purchase.BranchID, Quantity: item.Quantity})
+				if err != nil {
+					return err
+				}
+			} else {
+				return invErr
+			}
+		} else {
+			newQuantity := inventoryRow.Quantity + item.Quantity
+			if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, newQuantity); err != nil {
+				return err
+			}
+		}
+
+		movement := &inventory.StockMovement{
+			ProductID:     item.ProductID,
+			BranchID:      purchase.BranchID,
+			MovementType:  inventory.MovementTypeIN,
+			QuantityDelta: item.Quantity,
+			ReferenceType: inventory.PtrString("purchase"),
+			ReferenceID:   inventory.PtrInt64(purchaseID),
+			ActorUserID:   actorUserIDFromContext(ctx),
+			Metadata: map[string]any{
+				"purchase_number": purchase.PurchaseNumber,
+				"branch_id":       purchase.BranchID,
+				"product_id":      item.ProductID,
+				"supplier_id":     purchase.SupplierID,
+			},
+		}
+		if _, err = s.inventoryRepo.CreateMovementWithTx(ctx, tx, movement); err != nil {
+			return err
+		}
+	}
+
+	if err = s.repo.UpdatePurchaseStatusWithTx(ctx, tx, purchaseID, PurchaseStatusCompleted); err != nil {
+		return err
+	}
+
+	if s.auditSvc != nil {
+		auditMetadata := map[string]any{
+			"purchase_id":     purchaseID,
+			"purchase_number": purchase.PurchaseNumber,
+			"branch_id":       purchase.BranchID,
+			"supplier_id":     purchase.SupplierID,
+			"status":          PurchaseStatusCompleted,
+		}
+		resourceID := fmt.Sprintf("%d", purchaseID)
+		if _, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{
+			ActorUserID: actorUserIDFromContext(ctx),
+			Action:      "purchase.complete",
+			Resource:    "purchase",
+			ResourceID:  &resourceID,
+			Metadata:    auditMetadata,
+		}); err != nil {
+			return err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) CancelPurchase(ctx context.Context, purchaseID int64) (err error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return ErrAuthenticationRequired
+	}
+
+	allowed, err := s.authChecker.HasPermission(ctx, userID, PurchaseCancelPermission)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbidden
+	}
+
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	purchase, err := s.repo.GetPurchaseByIDForUpdate(ctx, tx, purchaseID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrPurchaseNotFound
+		}
+		return err
+	}
+
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, purchase.BranchID, true); err != nil {
+		return err
+	}
+
+	switch purchase.Status {
+	case PurchaseStatusDraft:
+		if err = s.repo.UpdatePurchaseStatusWithTx(ctx, tx, purchaseID, PurchaseStatusCancelled); err != nil {
+			return err
+		}
+	case PurchaseStatusCompleted:
+		items, err := s.repo.ListPurchaseItemsByPurchaseIDWithTx(ctx, tx, purchaseID)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return ErrPurchaseHasNoItems
+		}
+		for _, item := range items {
+			product, err := s.productSvc.GetByID(ctx, item.ProductID)
+			if err != nil {
+				if errors.Is(err, products.ErrProductNotFound) {
+					return ErrProductNotFound
+				}
+				return err
+			}
+			if !product.IsActive {
+				return ErrProductInactive
+			}
+
+			inventoryRow, invErr := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, purchase.BranchID)
+			if invErr != nil {
+				if errors.Is(invErr, sql.ErrNoRows) {
+					return ErrInsufficientStock
+				}
+				return invErr
+			}
+			newQuantity := inventoryRow.Quantity - item.Quantity
+			if newQuantity < 0 {
+				return ErrInsufficientStock
+			}
+			if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, newQuantity); err != nil {
+				return err
+			}
+
+			movement := &inventory.StockMovement{
+				ProductID:     item.ProductID,
+				BranchID:      purchase.BranchID,
+				MovementType:  inventory.MovementTypeOUT,
+				QuantityDelta: -item.Quantity,
+				ReferenceType: inventory.PtrString("purchase"),
+				ReferenceID:   inventory.PtrInt64(purchaseID),
+				ActorUserID:   actorUserIDFromContext(ctx),
+				Metadata: map[string]any{
+					"purchase_number": purchase.PurchaseNumber,
+					"branch_id":       purchase.BranchID,
+					"product_id":      item.ProductID,
+					"supplier_id":     purchase.SupplierID,
+				},
+			}
+			if _, err = s.inventoryRepo.CreateMovementWithTx(ctx, tx, movement); err != nil {
+				return err
+			}
+		}
+		if err = s.repo.UpdatePurchaseStatusWithTx(ctx, tx, purchaseID, PurchaseStatusCancelled); err != nil {
+			return err
+		}
+	case PurchaseStatusCancelled:
+		return ErrPurchaseAlreadyCancelled
+	default:
+		return ErrInvalidPurchaseTransition
+	}
+
+	if s.auditSvc != nil {
+		auditMetadata := map[string]any{
+			"purchase_id":     purchaseID,
+			"purchase_number": purchase.PurchaseNumber,
+			"branch_id":       purchase.BranchID,
+			"supplier_id":     purchase.SupplierID,
+			"status":          PurchaseStatusCancelled,
+		}
+		resourceID := fmt.Sprintf("%d", purchaseID)
+		if _, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{
+			ActorUserID: actorUserIDFromContext(ctx),
+			Action:      "purchase.cancel",
+			Resource:    "purchase",
+			ResourceID:  &resourceID,
+			Metadata:    auditMetadata,
+		}); err != nil {
+			return err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) ListPurchases(ctx context.Context, filter PurchaseFilter) ([]Purchase, error) {
