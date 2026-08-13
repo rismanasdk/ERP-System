@@ -100,14 +100,14 @@ func (r *fakePurchaseRepo) UpdatePurchaseStatusWithTx(ctx context.Context, tx *s
 }
 
 type fakeInventoryRepo struct {
-	getInventoryErr error
-	inventory       *inventory.Inventory
-	created         bool
-	updated         bool
-	updatedCount    int
-	movementCount   int
-	movementCreated bool
-	movementErr     error
+	getInventoryErr   error
+	inventory         *inventory.Inventory
+	created           bool
+	updated           bool
+	updatedCount      int
+	movementCount     int
+	movementCreated   bool
+	movementErr       error
 	createErrSequence []error
 	createAttempts    int
 }
