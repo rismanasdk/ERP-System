@@ -108,6 +108,8 @@ type fakeInventoryRepo struct {
 	movementCount   int
 	movementCreated bool
 	movementErr     error
+	createErrSequence []error
+	createAttempts    int
 }
 
 func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error) {
@@ -121,6 +123,15 @@ func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, 
 }
 
 func (r *fakeInventoryRepo) CreateWithTx(ctx context.Context, tx *sql.Tx, inv *inventory.Inventory) (int64, error) {
+	if r.createAttempts < len(r.createErrSequence) {
+		err := r.createErrSequence[r.createAttempts]
+		r.createAttempts++
+		if err != nil {
+			// simulate another tx creating the inventory concurrently by setting inventory row
+			r.inventory = &inventory.Inventory{ID: 999, ProductID: inv.ProductID, BranchID: inv.BranchID, Quantity: 0}
+			return 0, err
+		}
+	}
 	r.created = true
 	return 1, nil
 }
@@ -1267,6 +1278,37 @@ func TestCancelPurchase_RepeatedCancellationDoesNotDuplicateInventory(t *testing
 	}
 	if invRepo.movementCount != 1 {
 		t.Fatalf("expected no additional stock movement on second cancel, got %d", invRepo.movementCount)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCompletePurchase_ConcurrentInventoryCreateHandled(t *testing.T) {
+	service, repo, invRepo, mock, cleanup := newServiceWithMocks(t)
+	defer cleanup()
+
+	// simulate no inventory initially; CreateWithTx will return unique violation
+	repo.purchase = &Purchase{ID: 42, BranchID: 1, SupplierID: 3, PurchaseNumber: "PO-42", Status: PurchaseStatusDraft}
+	repo.purchaseItems = []PurchaseItem{{ID: 1, PurchaseID: 42, ProductID: 5, Quantity: 3, UnitCost: 10.0, Subtotal: 30.0}}
+	invRepo.inventory = nil
+	invRepo.createErrSequence = []error{&pq.Error{Code: "23505"}}
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	ctx := auth.ContextWithUserID(context.Background(), 7)
+	if err := service.CompletePurchase(ctx, 42); err != nil {
+		t.Fatalf("expected complete success despite concurrent inventory insert, got %v", err)
+	}
+	if !invRepo.created && !invRepo.updated {
+		t.Fatal("expected inventory to be created or updated when handling concurrent insert")
+	}
+	if invRepo.movementCount != 1 {
+		t.Fatalf("expected one stock movement, got %d", invRepo.movementCount)
+	}
+	if repo.purchase.Status != PurchaseStatusCompleted {
+		t.Fatalf("expected purchase status completed, got %s", repo.purchase.Status)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)

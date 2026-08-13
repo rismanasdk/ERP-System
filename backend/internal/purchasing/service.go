@@ -363,9 +363,21 @@ func (s *Service) CompletePurchase(ctx context.Context, purchaseID int64) (err e
 		inventoryRow, invErr := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, purchase.BranchID)
 		if invErr != nil {
 			if errors.Is(invErr, sql.ErrNoRows) {
-				_, err = s.inventoryRepo.CreateWithTx(ctx, tx, &inventory.Inventory{ProductID: item.ProductID, BranchID: purchase.BranchID, Quantity: item.Quantity})
-				if err != nil {
-					return err
+				// try to create inventory row; handle possible concurrent insert (unique constraint)
+				if _, err = s.inventoryRepo.CreateWithTx(ctx, tx, &inventory.Inventory{ProductID: item.ProductID, BranchID: purchase.BranchID, Quantity: item.Quantity}); err != nil {
+					if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+						// another tx created the inventory concurrently — re-read with FOR UPDATE and apply update
+						inventoryRow, invErr = s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, purchase.BranchID)
+						if invErr != nil {
+							return invErr
+						}
+						newQuantity := inventoryRow.Quantity + item.Quantity
+						if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, newQuantity); err != nil {
+							return err
+						}
+					} else {
+						return err
+					}
 				}
 			} else {
 				return invErr
