@@ -127,6 +127,7 @@ type fakeInventoryRepo struct {
 	mu          sync.Mutex
 	quantities  map[int64]int64
 	movements   []*inventory.StockMovement
+	updateErr   error
 	movementErr error
 }
 
@@ -147,6 +148,9 @@ func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, 
 func (r *fakeInventoryRepo) UpdateQuantityWithTx(ctx context.Context, tx *sql.Tx, id, quantity int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	for k := range r.quantities {
 		if k == id {
 			r.quantities[k] = quantity
@@ -384,4 +388,184 @@ func TestCancelSale_CompletedRestoresInventory(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
 	}
+}
+
+func TestCompleteSale_InventoryUpdateFailureRollsBack(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 5)
+	repo := newFakeSaleRepo()
+	invRepo := newFakeInventoryRepo()
+	invRepo.updateErr = errors.New("inventory update failed")
+	service, mock := newSalesServiceWithDB(t, repo, invRepo, &fakeAuditService{})
+	repo.sales[40] = &Sale{ID: 40, BranchID: 3, SaleNumber: "SALE-40", Status: SaleStatusDraft, TotalAmount: 100, CreatedBy: 5}
+	repo.itemsBySaleID[40] = []SaleItem{{ID: 400, SaleID: 40, ProductID: 1, Quantity: 2, UnitPrice: 50, Subtotal: 100}}
+	invRepo.quantities[1*100000+3] = 10
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	if err := service.CompleteSale(ctx, 40); !errors.Is(err, invRepo.updateErr) {
+		t.Fatalf("expected inventory update error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCompleteSale_StockMovementFailureRollsBack(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 5)
+	repo := newFakeSaleRepo()
+	invRepo := newFakeInventoryRepo()
+	invRepo.movementErr = errors.New("movement failed")
+	service, mock := newSalesServiceWithDB(t, repo, invRepo, &fakeAuditService{})
+	repo.sales[41] = &Sale{ID: 41, BranchID: 3, SaleNumber: "SALE-41", Status: SaleStatusDraft, TotalAmount: 100, CreatedBy: 5}
+	repo.itemsBySaleID[41] = []SaleItem{{ID: 401, SaleID: 41, ProductID: 1, Quantity: 2, UnitPrice: 50, Subtotal: 100}}
+	invRepo.quantities[1*100000+3] = 10
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	if err := service.CompleteSale(ctx, 41); !errors.Is(err, invRepo.movementErr) {
+		t.Fatalf("expected movement error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCompleteSale_AuditFailureRollsBack(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 5)
+	repo := newFakeSaleRepo()
+	invRepo := newFakeInventoryRepo()
+	auditSvc := &fakeAuditService{err: errors.New("audit fail")}
+	service, mock := newSalesServiceWithDB(t, repo, invRepo, auditSvc)
+	repo.sales[42] = &Sale{ID: 42, BranchID: 3, SaleNumber: "SALE-42", Status: SaleStatusDraft, TotalAmount: 100, CreatedBy: 5}
+	repo.itemsBySaleID[42] = []SaleItem{{ID: 402, SaleID: 42, ProductID: 1, Quantity: 2, UnitPrice: 50, Subtotal: 100}}
+	invRepo.quantities[1*100000+3] = 10
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	if err := service.CompleteSale(ctx, 42); !errors.Is(err, auditSvc.err) {
+		t.Fatalf("expected audit error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCancelSale_AuditFailureRollsBack(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 6)
+	repo := newFakeSaleRepo()
+	invRepo := newFakeInventoryRepo()
+	auditSvc := &fakeAuditService{err: errors.New("audit fail")}
+	service, mock := newSalesServiceWithDB(t, repo, invRepo, auditSvc)
+	repo.sales[43] = &Sale{ID: 43, BranchID: 3, SaleNumber: "SALE-43", Status: SaleStatusCompleted, TotalAmount: 100, CreatedBy: 6}
+	repo.itemsBySaleID[43] = []SaleItem{{ID: 403, SaleID: 43, ProductID: 1, Quantity: 2, UnitPrice: 50, Subtotal: 100}}
+	invRepo.quantities[1*100000+3] = 8
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE sales\s+SET status = \$1, updated_at = NOW\(\)\s+WHERE id = \$2`).
+		WithArgs(SaleStatusCancelled, int64(43)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectRollback()
+
+	if err := service.CancelSale(ctx, 43); !errors.Is(err, auditSvc.err) {
+		t.Fatalf("expected audit error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCompleteSale_DuplicateCompletionPrevention(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 5)
+	repo := newFakeSaleRepo()
+	invRepo := newFakeInventoryRepo()
+	service, mock := newSalesServiceWithDB(t, repo, invRepo, &fakeAuditService{})
+	repo.sales[44] = &Sale{ID: 44, BranchID: 3, SaleNumber: "SALE-44", Status: SaleStatusDraft, TotalAmount: 100, CreatedBy: 5}
+	repo.itemsBySaleID[44] = []SaleItem{{ID: 404, SaleID: 44, ProductID: 1, Quantity: 2, UnitPrice: 50, Subtotal: 100}}
+	invRepo.quantities[1*100000+3] = 10
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+	if err := service.CompleteSale(ctx, 44); err != nil {
+		t.Fatalf("unexpected error on first completion: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+	if err := service.CompleteSale(ctx, 44); !errors.Is(err, ErrSaleAlreadyCompleted) {
+		t.Fatalf("expected duplicate completion error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCancelSale_DuplicateCancellationPrevention(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 6)
+	repo := newFakeSaleRepo()
+	invRepo := newFakeInventoryRepo()
+	service, mock := newSalesServiceWithDB(t, repo, invRepo, &fakeAuditService{})
+	repo.sales[45] = &Sale{ID: 45, BranchID: 3, SaleNumber: "SALE-45", Status: SaleStatusDraft, TotalAmount: 100, CreatedBy: 6}
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE sales\s+SET status = \$1, updated_at = NOW\(\)\s+WHERE id = \$2`).
+		WithArgs(SaleStatusCancelled, int64(45)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := service.CancelSale(ctx, 45); err != nil {
+		t.Fatalf("unexpected first cancel error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+
+	repo.sales[45].Status = SaleStatusCancelled
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+	if err := service.CancelSale(ctx, 45); !errors.Is(err, ErrSaleAlreadyCancelled) {
+		t.Fatalf("expected duplicate cancellation error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestGetSale_ForbiddenBranchAccess(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 7)
+	repo := newFakeSaleRepo()
+	repo.sales[46] = &Sale{ID: 46, BranchID: 99, SaleNumber: "SALE-46", Status: SaleStatusDraft, TotalAmount: 50, CreatedBy: 7}
+	service := NewService(repo, newFakeInventoryRepo(), &fakeProductService{products: map[int64]*products.Product{}}, &fakeBranchService{allowedBranches: []branches.Branch{}}, &fakeAuthChecker{allowed: true}, &fakeAuditService{})
+
+	if _, _, err := service.GetSale(ctx, 46); !errors.Is(err, branches.ErrBranchAccessDenied) {
+		t.Fatalf("expected branch access denied, got %v", err)
+	}
+}
+
+func TestListSales_ForbiddenBranchAccess(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 7)
+	repo := newFakeSaleRepo()
+	service := NewService(repo, newFakeInventoryRepo(), &fakeProductService{products: map[int64]*products.Product{}}, &fakeBranchService{err: branches.ErrBranchAccessDenied}, &fakeAuthChecker{allowed: true}, &fakeAuditService{})
+
+	if _, err := service.ListSales(ctx, SaleFilter{BranchID: int64Ptr(9)}); !errors.Is(err, branches.ErrBranchAccessDenied) {
+		t.Fatalf("expected branch access denied, got %v", err)
+	}
+}
+
+func TestListSales_MultipleAccessibleBranches(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 7)
+	repo := newFakeSaleRepo()
+	repo.sales[50] = &Sale{ID: 50, BranchID: 10, SaleNumber: "SALE-50", Status: SaleStatusDraft, TotalAmount: 10, CreatedBy: 7}
+	repo.sales[51] = &Sale{ID: 51, BranchID: 11, SaleNumber: "SALE-51", Status: SaleStatusDraft, TotalAmount: 20, CreatedBy: 7}
+	service := NewService(repo, newFakeInventoryRepo(), &fakeProductService{products: map[int64]*products.Product{}}, &fakeBranchService{allowedBranches: []branches.Branch{{ID: 10, IsActive: true}, {ID: 11, IsActive: true}}}, &fakeAuthChecker{allowed: true}, &fakeAuditService{})
+
+	salesList, err := service.ListSales(ctx, SaleFilter{})
+	if err != nil {
+		t.Fatalf("unexpected list error: %v", err)
+	}
+	if len(salesList) != 2 {
+		t.Fatalf("expected 2 sales across accessible branches, got %d", len(salesList))
+	}
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
 }
