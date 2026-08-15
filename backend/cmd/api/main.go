@@ -12,6 +12,7 @@ import (
 	"erp-system/backend/internal/audit"
 	"erp-system/backend/internal/auth"
 	"erp-system/backend/internal/branches"
+	"erp-system/backend/internal/dashboard"
 	"erp-system/backend/internal/inventory"
 	"erp-system/backend/internal/master/customers"
 	"erp-system/backend/internal/master/products"
@@ -78,6 +79,10 @@ func main() {
 	branchService := branches.NewService(branchRepo, authService, auditService)
 	branchHandler := branches.NewHandler(branchService)
 
+	dashboardRepo := dashboard.NewRepository(db)
+	dashboardSvc := dashboard.NewService(dashboardRepo, branchService, authService, authService)
+	dashboardHandler := dashboard.NewHandler(dashboardSvc)
+
 	productRepo := products.NewRepository(db)
 	productService := products.NewService(productRepo, auditService)
 	productHandler := products.NewHandler(productService)
@@ -116,6 +121,7 @@ func main() {
 	router.Handle("/api/v1/branches/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.read")(http.HandlerFunc(branchHandler.Get)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/branches", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.create")(http.HandlerFunc(branchHandler.Create)))).Methods(http.MethodPost)
 	router.Handle("/api/v1/branches/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.adjust")(http.HandlerFunc(branchHandler.Update)))).Methods(http.MethodPut)
+	router.Handle("/api/v1/dashboard/summary", authMiddleware.Authenticate(authMiddleware.RequirePermission(dashboard.DashboardReadPermission)(http.HandlerFunc(dashboardHandler.Summary)))).Methods(http.MethodGet)
 	registerInventoryRoutes(router, authMiddleware, inventoryHandler)
 	registerPurchasingRoutes(router, authMiddleware, purchaseHandler)
 	registerSalesRoutes(router, authMiddleware, saleHandler)
