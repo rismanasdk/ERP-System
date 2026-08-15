@@ -20,6 +20,7 @@ import (
 	"erp-system/backend/internal/permissions"
 	"erp-system/backend/internal/purchasing"
 	"erp-system/backend/internal/realtime"
+	"erp-system/backend/internal/reporting"
 	"erp-system/backend/internal/roles"
 	"erp-system/backend/internal/sales"
 	"erp-system/backend/internal/users"
@@ -83,6 +84,10 @@ func main() {
 	dashboardSvc := dashboard.NewService(dashboardRepo, branchService, authService, authService)
 	dashboardHandler := dashboard.NewHandler(dashboardSvc)
 
+	reportingRepo := reporting.NewRepository(db)
+	reportingSvc := reporting.NewService(reportingRepo, branchService, authService, authService)
+	reportingHandler := reporting.NewHandler(reportingSvc)
+
 	productRepo := products.NewRepository(db)
 	productService := products.NewService(productRepo, auditService)
 	productHandler := products.NewHandler(productService)
@@ -122,6 +127,10 @@ func main() {
 	router.Handle("/api/v1/branches", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.create")(http.HandlerFunc(branchHandler.Create)))).Methods(http.MethodPost)
 	router.Handle("/api/v1/branches/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.adjust")(http.HandlerFunc(branchHandler.Update)))).Methods(http.MethodPut)
 	router.Handle("/api/v1/dashboard/summary", authMiddleware.Authenticate(authMiddleware.RequirePermission(dashboard.DashboardReadPermission)(http.HandlerFunc(dashboardHandler.Summary)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/reports/sales", authMiddleware.Authenticate(authMiddleware.RequirePermission(reporting.ReportReadPermission)(http.HandlerFunc(reportingHandler.SalesReport)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/reports/purchases", authMiddleware.Authenticate(authMiddleware.RequirePermission(reporting.ReportReadPermission)(http.HandlerFunc(reportingHandler.PurchasesReport)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/reports/inventory", authMiddleware.Authenticate(authMiddleware.RequirePermission(reporting.ReportReadPermission)(http.HandlerFunc(reportingHandler.InventoryReport)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/reports/profit", authMiddleware.Authenticate(authMiddleware.RequirePermission(reporting.ReportReadPermission)(http.HandlerFunc(reportingHandler.ProfitReport)))).Methods(http.MethodGet)
 	registerInventoryRoutes(router, authMiddleware, inventoryHandler)
 	registerPurchasingRoutes(router, authMiddleware, purchaseHandler)
 	registerSalesRoutes(router, authMiddleware, saleHandler)
