@@ -117,6 +117,8 @@ func main() {
 	realtimeHandler := realtime.NewHandler(realtimeHub, authService)
 
 	router := mux.NewRouter()
+	router.Use(corsMiddleware)
+	router.PathPrefix("/api/v1").HandlerFunc(corsPreflightHandler).Methods(http.MethodOptions)
 	router.HandleFunc("/api/v1/health", healthHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/auth/login", authHandler.Login).Methods(http.MethodPost)
 	router.HandleFunc("/api/v1/auth/refresh", authHandler.Refresh).Methods(http.MethodPost)
@@ -150,6 +152,54 @@ func main() {
 
 func protectedUsersHandler(w http.ResponseWriter, r *http.Request) {
 	response.JSONOK(w, map[string]string{"message": "permission granted"})
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" && isAllowedOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Max-Age", "600")
+			w.Header().Set("Vary", "Origin")
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func corsPreflightHandler(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin != "" && isAllowedOrigin(origin) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Max-Age", "600")
+		w.Header().Set("Vary", "Origin")
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func isAllowedOrigin(origin string) bool {
+	allowed := []string{
+		"http://localhost:5173",
+		"http://127.0.0.1:5173",
+		"http://192.168.0.9:5173",
+	}
+	if configured := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); configured != "" {
+		for _, part := range strings.Split(configured, ",") {
+			allowed = append(allowed, strings.TrimSpace(part))
+		}
+	}
+	for _, candidate := range allowed {
+		if candidate != "" && candidate == origin {
+			return true
+		}
+	}
+	return false
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {

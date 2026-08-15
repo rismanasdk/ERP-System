@@ -177,3 +177,30 @@ func TestInventoryRoutes_DenyUnauthorizedBranch(t *testing.T) {
 		t.Fatalf("expected FORBIDDEN error, got %v", body)
 	}
 }
+
+func TestCORSPreflightAllowsFrontendOrigins(t *testing.T) {
+	router := mux.NewRouter()
+	router.Use(corsMiddleware)
+	router.PathPrefix("/api/v1").HandlerFunc(corsPreflightHandler).Methods(http.MethodOptions)
+	router.HandleFunc("/api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}).Methods(http.MethodPost)
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/auth/login", nil)
+	req.Header.Set("Origin", "http://192.168.0.9:5173")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "Content-Type, Authorization")
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for OPTIONS preflight, got %d", res.Code)
+	}
+	if got := res.Header().Get("Access-Control-Allow-Origin"); got != "http://192.168.0.9:5173" {
+		t.Fatalf("expected Access-Control-Allow-Origin to echo frontend origin, got %q", got)
+	}
+	if got := res.Header().Get("Access-Control-Allow-Methods"); got == "" {
+		t.Fatal("expected Access-Control-Allow-Methods header to be present")
+	}
+}
