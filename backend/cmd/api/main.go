@@ -13,7 +13,9 @@ import (
 	"erp-system/backend/internal/auth"
 	"erp-system/backend/internal/branches"
 	"erp-system/backend/internal/inventory"
+	"erp-system/backend/internal/master/customers"
 	"erp-system/backend/internal/master/products"
+	"erp-system/backend/internal/master/suppliers"
 	"erp-system/backend/internal/permissions"
 	"erp-system/backend/internal/purchasing"
 	"erp-system/backend/internal/realtime"
@@ -80,6 +82,14 @@ func main() {
 	productService := products.NewService(productRepo, auditService)
 	productHandler := products.NewHandler(productService)
 
+	customerRepo := customers.NewRepository(db)
+	customerService := customers.NewService(customerRepo, auditService)
+	customerHandler := customers.NewHandler(customerService)
+
+	supplierRepo := suppliers.NewRepository(db)
+	supplierService := suppliers.NewService(supplierRepo, auditService)
+	supplierHandler := suppliers.NewHandler(supplierService)
+
 	inventoryRepo := inventory.NewRepository(db)
 	inventoryService := inventory.NewService(inventoryRepo, productService, branchService, authService, auditService)
 	inventoryHandler := inventory.NewHandler(inventoryService)
@@ -109,6 +119,8 @@ func main() {
 	registerInventoryRoutes(router, authMiddleware, inventoryHandler)
 	registerPurchasingRoutes(router, authMiddleware, purchaseHandler)
 	registerSalesRoutes(router, authMiddleware, saleHandler)
+	registerCustomerRoutes(router, authMiddleware, customerHandler)
+	registerSupplierRoutes(router, authMiddleware, supplierHandler)
 	router.Handle("/api/v1/products", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.read")(http.HandlerFunc(productHandler.List)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/products/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.read")(http.HandlerFunc(productHandler.Get)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/products", authMiddleware.Authenticate(authMiddleware.RequirePermission("products.create")(http.HandlerFunc(productHandler.Create)))).Methods(http.MethodPost)
@@ -150,4 +162,20 @@ func registerSalesRoutes(router *mux.Router, middleware *auth.Middleware, handle
 	router.Handle("/api/v1/sales/{id}", middleware.Authenticate(middleware.RequirePermission("sales.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/sales/{id}/complete", middleware.Authenticate(middleware.RequirePermission(sales.SaleCompletePermission)(http.HandlerFunc(handler.Complete)))).Methods(http.MethodPost)
 	router.Handle("/api/v1/sales/{id}/cancel", middleware.Authenticate(middleware.RequirePermission(sales.SaleCancelPermission)(http.HandlerFunc(handler.Cancel)))).Methods(http.MethodPost)
+}
+
+func registerCustomerRoutes(router *mux.Router, middleware *auth.Middleware, handler *customers.Handler) {
+	router.Handle("/api/v1/customers", middleware.Authenticate(middleware.RequirePermission("customers.read")(http.HandlerFunc(handler.List)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/customers/{id}", middleware.Authenticate(middleware.RequirePermission("customers.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/customers", middleware.Authenticate(middleware.RequirePermission("customers.create")(http.HandlerFunc(handler.Create)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/customers/{id}", middleware.Authenticate(middleware.RequirePermission("customers.update")(http.HandlerFunc(handler.Update)))).Methods(http.MethodPut)
+	router.Handle("/api/v1/customers/{id}", middleware.Authenticate(middleware.RequirePermission("customers.delete")(http.HandlerFunc(handler.Delete)))).Methods(http.MethodDelete)
+}
+
+func registerSupplierRoutes(router *mux.Router, middleware *auth.Middleware, handler *suppliers.Handler) {
+	router.Handle("/api/v1/suppliers", middleware.Authenticate(middleware.RequirePermission("suppliers.read")(http.HandlerFunc(handler.List)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/suppliers/{id}", middleware.Authenticate(middleware.RequirePermission("suppliers.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/suppliers", middleware.Authenticate(middleware.RequirePermission("suppliers.create")(http.HandlerFunc(handler.Create)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/suppliers/{id}", middleware.Authenticate(middleware.RequirePermission("suppliers.update")(http.HandlerFunc(handler.Update)))).Methods(http.MethodPut)
+	router.Handle("/api/v1/suppliers/{id}", middleware.Authenticate(middleware.RequirePermission("suppliers.delete")(http.HandlerFunc(handler.Delete)))).Methods(http.MethodDelete)
 }

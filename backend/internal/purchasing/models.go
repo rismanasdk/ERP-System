@@ -1,23 +1,13 @@
 package purchasing
 
-import "time"
+import (
+	"time"
 
-type Supplier struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Code      string    `json:"code"`
-	Phone     *string   `json:"phone,omitempty"`
-	Email     *string   `json:"email,omitempty"`
-	Address   *string   `json:"address,omitempty"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
-}
+	"erp-system/backend/internal/master/suppliers"
+)
 
-type SupplierFilter struct {
-	Active *bool
-	Search *string
-}
+type Supplier = suppliers.Supplier
+type SupplierFilter = suppliers.SupplierFilter
 
 type Purchase struct {
 	ID             int64     `json:"id"`
