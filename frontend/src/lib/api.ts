@@ -105,6 +105,11 @@ export const api = {
     const response = await api.post<ApiEnvelope<RefreshResponse>>('/api/v1/auth/refresh', { refresh_token: refreshToken })
     return response.data
   },
+
+  getDashboardSummary: async <T>(token?: string): Promise<T> => {
+    const response = await api.get<ApiEnvelope<T>>('/api/v1/dashboard/summary', token)
+    return response.data
+  },
 }
 
 export { ApiError }
