@@ -15,16 +15,22 @@ export {
   Filter as FilterIcon,
   MoreVertical as MoreIcon,
   
+  
+  
   // Status & feedback
   AlertCircle as ErrorIcon,
   CheckCircle2 as SuccessIcon,
   Info as InfoIcon,
-
+  
   // Domain-specific
-  Package as ProductIcon,
+  LayoutDashboard as DashboardIcon,
+  Package as ProductsIcon,
+  Users as CustomersIcon,
+  Truck as SuppliersIcon,
   Warehouse as InventoryIcon,
   ShoppingCart as PurchaseIcon,
-  Users as UsersIcon,
+  TrendingUp as SalesIcon,
+  FileText as ReportsIcon,
   Shield as RoleIcon,
   ClipboardList as AuditLogIcon,
   Building2 as BranchIcon,

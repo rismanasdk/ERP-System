@@ -39,8 +39,8 @@ export function InventoryAdjustForm({ initial = {}, submitting = false, onSubmit
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-slate-700">Movement Type</label>
-        <select value={movementType} onChange={(e) => setMovementType(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm">
+            <label htmlFor="movement_type" className="block text-sm font-medium text-slate-700">Movement Type</label>
+            <select id="movement_type" value={movementType} onChange={(e) => setMovementType(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm">
           <option value="IN">IN</option>
           <option value="OUT">OUT</option>
           <option value="ADJUSTMENT">ADJUSTMENT</option>
@@ -48,19 +48,19 @@ export function InventoryAdjustForm({ initial = {}, submitting = false, onSubmit
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-slate-700">Quantity Delta</label>
-        <input value={quantityDelta} onChange={(e) => setQuantityDelta(e.target.value)} type="number" className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+        <label htmlFor="quantity_delta" className="block text-sm font-medium text-slate-700">Quantity Delta</label>
+        <input id="quantity_delta" value={quantityDelta} onChange={(e) => setQuantityDelta(e.target.value)} type="number" className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
         {errors.quantity_delta ? <p className="mt-1 text-sm text-red-600">{errors.quantity_delta}</p> : null}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-slate-700">Reference Type (optional)</label>
-        <input value={referenceType} onChange={(e) => setReferenceType(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+        <label htmlFor="reference_type" className="block text-sm font-medium text-slate-700">Reference Type (optional)</label>
+        <input id="reference_type" value={referenceType} onChange={(e) => setReferenceType(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-slate-700">Reference ID (optional)</label>
-        <input value={referenceId} onChange={(e) => setReferenceId(e.target.value)} type="number" className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+        <label htmlFor="reference_id" className="block text-sm font-medium text-slate-700">Reference ID (optional)</label>
+        <input id="reference_id" value={referenceId} onChange={(e) => setReferenceId(e.target.value)} type="number" className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
       </div>
 
       <div className="flex items-center gap-3">

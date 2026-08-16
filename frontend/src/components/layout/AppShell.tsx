@@ -1,16 +1,26 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { LogoutIcon } from '../../utils/iconsUtils'
+import {
+  DashboardIcon,
+  ProductsIcon,
+  CustomersIcon,
+  SuppliersIcon,
+  InventoryIcon,
+  PurchaseIcon,
+  SalesIcon,
+  ReportsIcon
+} from '../../utils/iconsUtils'
 
 const navItems = [
-  { label: 'Dashboard', to: '/dashboard' },
-  { label: 'Products', to: '/products' },
-  { label: 'Customers', to: '/customers' },
-  { label: 'Suppliers', to: '/suppliers' },
-  { label: 'Inventory', to: '/inventory' },
-  { label: 'Purchasing', to: '/purchasing' },
-  { label: 'Sales', to: '/sales' },
-  { label: 'Reports', to: '/reports' },
+  { label: 'Dashboard', to: '/dashboard', icon: DashboardIcon },
+  { label: 'Products', to: '/products', icon: ProductsIcon },
+  { label: 'Customers', to: '/customers', icon: CustomersIcon },
+  { label: 'Suppliers', to: '/suppliers', icon: SuppliersIcon },
+  { label: 'Inventory', to: '/inventory', icon: InventoryIcon },
+  { label: 'Purchasing', to: '/purchasing', icon: PurchaseIcon },
+  { label: 'Sales', to: '/sales', icon: SalesIcon },
+  { label: 'Reports', to: '/reports', icon: ReportsIcon },
 ]
 
 export function AppShell() {
@@ -20,7 +30,10 @@ export function AppShell() {
     <div className="flex min-h-screen bg-slate-100">
       <aside className="w-72 flex flex-col h-screen sticky top-0 bg-slate-900 text-slate-100">
         <div className="border-b border-slate-700 px-6 py-5">
-          <div className="mt-2 text-xl uppercase tracking-[0.2em] font-semibold text-center">ERP System</div>
+          <div className="flex items-center justify-center gap-2">
+            <img src="/ERP-SYSTEM.svg" alt="ERP System logo" className="h-8 w-8" />
+            <span className="text-xl uppercase tracking-[0.2em] font-semibold">ERP System</span>
+          </div>
         </div>
         
         <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
@@ -34,7 +47,8 @@ export function AppShell() {
                 }`
               }
             >
-              {item.label}
+              {item.icon && <item.icon className="h-5 w-5" />}
+              <span className="ml-3">{item.label}</span>
             </NavLink>
           ))}
         </nav>

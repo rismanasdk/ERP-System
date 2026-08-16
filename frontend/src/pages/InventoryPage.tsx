@@ -6,6 +6,12 @@ import { readStoredAccessToken } from '../services/authSession'
 import { InventoryAdjustForm } from '../components/inventory/InventoryAdjustForm'
 import { InventoryCreateForm } from '../components/inventory/InventoryCreateForm'
 import { ApiError } from '../lib/api'
+import { productsApi } from '../services/products'
+import { branchesApi } from '../services/branches'
+import type { Branch } from '../types/auth'
+import type { Product } from '../types/product'
+import { EditIcon, CreateIcon, CloseIcon, SearchIcon } from '../utils/iconsUtils'
+import { Dialog, DialogContent } from '../components/ui/dialog'
 
 export function InventoryPage() {
   const { user } = useAuth()
@@ -14,8 +20,11 @@ export function InventoryPage() {
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState({ branch_id: '', product_id: '' })
   const [adjustingFor, setAdjustingFor] = useState<Inventory | null>(null)
+  const [viewingFor, setViewingFor] = useState<Inventory | null>(null)
   const [creating, setCreating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [productMap, setProductMap] = useState<Record<number, Product | null>>({})
+  const [branchMap, setBranchMap] = useState<Record<number, Branch | null>>({})
 
   const token = readStoredAccessToken() ?? undefined
 
@@ -28,6 +37,38 @@ export function InventoryPage() {
       if (filter.product_id) f.product_id = Number(filter.product_id)
       const res = await inventoryApi.list(f, token)
       setItems(res)
+      // fetch product details for displayed items
+      const ids = Array.from(new Set(res.map((r) => r.product_id))).filter(Boolean) as number[]
+      const missing = ids.filter((id) => !(id in productMap))
+      if (missing.length) {
+        const entries = await Promise.all(
+          missing.map(async (id) => {
+            try {
+              const p = await productsApi.getById(id, token)
+              return [id, p] as const
+            } catch {
+              return [id, null] as const
+            }
+          }),
+        )
+        setProductMap((m) => ({ ...m, ...Object.fromEntries(entries) }))
+      }
+      // fetch branch details for displayed items
+      const branchIds = Array.from(new Set(res.map((r) => r.branch_id))).filter(Boolean) as number[]
+      const missingBranches = branchIds.filter((id) => !(id in branchMap))
+      if (missingBranches.length) {
+        const bentries = await Promise.all(
+          missingBranches.map(async (id) => {
+            try {
+              const b = await branchesApi.getById(id, token)
+              return [id, b] as const
+            } catch {
+              return [id, null] as const
+            }
+          }),
+        )
+        setBranchMap((m) => ({ ...m, ...Object.fromEntries(bentries) }))
+      }
     } catch (err) {
       const e = err as ApiError
       if (e instanceof ApiError) {
@@ -39,7 +80,7 @@ export function InventoryPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [filter, token])
+  }, [filter, token, productMap, branchMap])
 
   useEffect(() => {
     let active = true
@@ -97,7 +138,10 @@ export function InventoryPage() {
         </div>
         <div className="flex items-center gap-3">
           {canCreate ? (
-            <button onClick={() => setCreating(true)} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500">Create</button>
+            <button onClick={() => setCreating(true)} className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 transition-colors">
+              <CreateIcon className="h-4 w-4" />
+              Create
+            </button>
           ) : null}
         </div>
       </div>
@@ -113,9 +157,12 @@ export function InventoryPage() {
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-3">
-          <input value={filter.product_id} onChange={(e) => setFilter((s) => ({ ...s, product_id: e.target.value }))} placeholder="Filter by product id" className="rounded-md border border-slate-200 px-3 py-2" />
-          <input value={filter.branch_id} onChange={(e) => setFilter((s) => ({ ...s, branch_id: e.target.value }))} placeholder="Filter by branch id" className="rounded-md border border-slate-200 px-3 py-2" />
-          <button onClick={() => void load()} className="rounded-md border border-slate-300 bg-white px-3 py-2">Apply</button>
+          <div className="relative flex-1 max-w-sm">
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input value={filter.product_id} onChange={(e) => setFilter((s) => ({ ...s, product_id: e.target.value }))} placeholder="Filter by product id" className="w-full rounded-md border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+          </div>
+          <input value={filter.branch_id} onChange={(e) => setFilter((s) => ({ ...s, branch_id: e.target.value }))} placeholder="Filter by branch id" className="rounded-md border border-slate-200 px-3 py-2 text-sm" />
+          <button onClick={() => void load()} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-50 transition-colors">Apply</button>
         </div>
 
         <div className="mt-4 overflow-auto">
@@ -129,28 +176,47 @@ export function InventoryPage() {
           ) : (
             <table className="min-w-full table-auto">
               <thead>
-                <tr className="text-left text-sm text-slate-500">
-                  <th className="px-3 py-2">Product ID</th>
-                  <th className="px-3 py-2">Branch ID</th>
-                  <th className="px-3 py-2">Quantity</th>
-                  <th className="px-3 py-2">Updated</th>
-                  <th className="px-3 py-2">Actions</th>
+                <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wider text-slate-500">
+                  <th className="px-3 py-3">Code</th>
+                  <th className="px-3 py-3">Name</th>
+                  <th className="px-3 py-3">Unit</th>
+                  <th className="px-3 py-3">Quantity</th>
+                  <th className="px-3 py-3">Branch</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {rows.map((i) => (
-                  <tr key={i.id} className="border-t">
-                    <td className="px-3 py-2 align-top">{i.product_id}</td>
-                    <td className="px-3 py-2 align-top">{i.branch_id}</td>
-                    <td className="px-3 py-2 align-top">{i.quantity}</td>
-                    <td className="px-3 py-2 align-top">{i.updated_at ?? i.created_at ?? '-'}</td>
-                    <td className="px-3 py-2 align-top">
-                      <div className="flex gap-2">
-                        {canAdjust ? <button onClick={() => setAdjustingFor(i)} className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm">Adjust</button> : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-slate-100">
+                {rows.map((i) => {
+                  const p = productMap[i.product_id]
+                  return (
+                    <tr key={i.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-3 py-3 text-sm font-medium text-slate-900">{p?.sku ?? `#${i.product_id}`}</td>
+                      <td className="px-3 py-3 text-sm text-slate-700">{p?.name ?? '-'}</td>
+                      <td className="px-3 py-3 text-sm text-slate-500">{p?.unit ?? '-'}</td>
+                      <td className="px-3 py-3 text-sm text-slate-700">{i.quantity}</td>
+                      <td className="px-3 py-3 text-sm text-slate-500">{branchMap[i.branch_id]?.name ?? i.branch_id ?? '-'}</td>
+                      <td className="px-3 py-3 text-sm">
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${i.quantity > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                          {i.quantity > 0 ? 'In Stock' : 'Out of Stock'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-sm text-right">
+                        <div className="inline-flex items-center gap-2">
+                          <button onClick={() => setViewingFor(i)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                            View
+                          </button>
+                          {canAdjust ? (
+                            <button onClick={() => setAdjustingFor(i)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                              <EditIcon className="h-3.5 w-3.5" />
+                              Adjust
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}
@@ -158,32 +224,59 @@ export function InventoryPage() {
       </div>
 
       {creating && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h3 className="text-lg font-semibold">Create inventory</h3>
-          <div className="mt-4">
-            <InventoryCreateForm
-              key="create-inventory"
-              submitting={submitting}
-              onSubmit={onCreate}
-              onCancel={() => setCreating(false)}
-            />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setCreating(false)} />
+
+          <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-semibold text-slate-900">Create Inventory</h3>
+              <button onClick={() => setCreating(false)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
+                <CloseIcon className="h-5 w-5" />
+              </button>
+            </div>
+
+            <InventoryCreateForm key="create-inventory" submitting={submitting} onSubmit={onCreate} onCancel={() => setCreating(false)} />
           </div>
         </div>
       )}
 
       {adjustingFor && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h3 className="text-lg font-semibold">Adjust inventory for product {adjustingFor.product_id} (branch {adjustingFor.branch_id})</h3>
-          <div className="mt-4">
-            <InventoryAdjustForm
-              key={`adjust-${adjustingFor.id}`}
-              initial={{}}
-              submitting={submitting}
-              onSubmit={onAdjust}
-              onCancel={() => setAdjustingFor(null)}
-            />
-          </div>
-        </div>
+        <Dialog open={Boolean(adjustingFor)} onOpenChange={(open) => { if (!open) setAdjustingFor(null) }}>
+          <DialogContent>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-semibold text-slate-900">{`Adjust inventory for product ${adjustingFor?.product_id}`}</h3>
+            </div>
+            <InventoryAdjustForm key={`adjust-${adjustingFor.id}`} initial={{}} submitting={submitting} onSubmit={onAdjust} onCancel={() => setAdjustingFor(null)} />
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {viewingFor && (
+        <Dialog open={Boolean(viewingFor)} onOpenChange={(open) => { if (!open) setViewingFor(null) }}>
+          <DialogContent>
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-slate-900">Inventory detail</h3>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <div className="text-sm text-slate-500">Product</div>
+                <div className="text-sm font-medium">{productMap[viewingFor.product_id]?.name ?? `#${viewingFor.product_id}`}</div>
+              </div>
+              <div>
+                <div className="text-sm text-slate-500">Branch</div>
+                <div className="text-sm font-medium">{branchMap[viewingFor.branch_id]?.name ?? viewingFor.branch_id}</div>
+              </div>
+              <div>
+                <div className="text-sm text-slate-500">Quantity</div>
+                <div className="text-sm font-medium">{viewingFor.quantity}</div>
+              </div>
+              <div>
+                <div className="text-sm text-slate-500">Created</div>
+                <div className="text-sm font-medium">{viewingFor.created_at ?? '-'}</div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   )
