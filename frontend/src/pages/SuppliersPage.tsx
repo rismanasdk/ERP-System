@@ -22,6 +22,8 @@ export function SuppliersPage() {
 
   const token = readStoredAccessToken() ?? undefined
   const rows = useMemo(() => suppliers, [suppliers])
+
+  // Pagination: 10 item per halaman, slicing dilakukan di client dari `rows`
   const { page, totalPages, pageItems, goToPage, resetPage } = usePagination(rows, 10)
 
   const load = useCallback(async () => {
@@ -33,7 +35,7 @@ export function SuppliersPage() {
       if (filter.active !== '') f.active = filter.active === 'true'
       const res = await suppliersApi.list(f, token)
       setSuppliers(res)
-      resetPage()
+      resetPage() // balik ke halaman 1 tiap kali hasil filter berubah
     } catch (err) {
       const e = err as ApiError
       if (e instanceof ApiError) {
@@ -45,6 +47,7 @@ export function SuppliersPage() {
     } finally {
       setIsLoading(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, token])
 
   useEffect(() => {
@@ -196,7 +199,7 @@ export function SuppliersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {rows.map((s) => (
+                {pageItems.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-3 py-3 text-sm font-medium text-slate-900">{s.code}</td>
                     <td className="px-3 py-3 text-sm text-slate-700">{s.name}</td>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import type { Inventory } from '../types/inventory'
 import { inventoryApi } from '../services/inventory'
@@ -12,6 +12,7 @@ import type { Branch } from '../types/auth'
 import type { Product } from '../types/product'
 import { EditIcon, CreateIcon, CloseIcon, SearchIcon } from '../utils/iconsUtils'
 import { Dialog, DialogContent } from '../components/ui/dialog'
+import { usePagination, PaginationControl } from '../utils/paginationUtils'
 
 export function InventoryPage() {
   const { user } = useAuth()
@@ -27,6 +28,50 @@ export function InventoryPage() {
   const [branchMap, setBranchMap] = useState<Record<number, Branch | null>>({})
 
   const token = readStoredAccessToken() ?? undefined
+  const rows = useMemo(() => items, [items])
+  const { page, totalPages, pageItems, goToPage, resetPage } = usePagination(rows, 10)
+
+  const productMapRef = useRef(productMap)
+  useEffect(() => {
+    productMapRef.current = productMap
+  }, [productMap])
+
+  const branchMapRef = useRef(branchMap)
+  useEffect(() => {
+    branchMapRef.current = branchMap
+  }, [branchMap])
+
+  const fetchMissingProducts = useCallback(async (ids: number[]) => {
+    const missing = ids.filter((id) => !(id in productMapRef.current))
+    if (!missing.length) return
+    const entries = await Promise.all(
+      missing.map(async (id) => {
+        try {
+          const p = await productsApi.getById(id, token)
+          return [id, p] as const
+        } catch {
+          return [id, null] as const
+        }
+      }),
+    )
+    setProductMap((m) => ({ ...m, ...Object.fromEntries(entries) }))
+  }, [token])
+
+  const fetchMissingBranches = useCallback(async (ids: number[]) => {
+    const missing = ids.filter((id) => !(id in branchMapRef.current))
+    if (!missing.length) return
+    const entries = await Promise.all(
+      missing.map(async (id) => {
+        try {
+          const b = await branchesApi.getById(id, token)
+          return [id, b] as const
+        } catch {
+          return [id, null] as const
+        }
+      }),
+    )
+    setBranchMap((m) => ({ ...m, ...Object.fromEntries(entries) }))
+  }, [token])
 
   const load = useCallback(async () => {
     setIsLoading(true)
@@ -37,38 +82,11 @@ export function InventoryPage() {
       if (filter.product_id) f.product_id = Number(filter.product_id)
       const res = await inventoryApi.list(f, token)
       setItems(res)
-      // fetch product details for displayed items
+      resetPage()
+
       const ids = Array.from(new Set(res.map((r) => r.product_id))).filter(Boolean) as number[]
-      const missing = ids.filter((id) => !(id in productMap))
-      if (missing.length) {
-        const entries = await Promise.all(
-          missing.map(async (id) => {
-            try {
-              const p = await productsApi.getById(id, token)
-              return [id, p] as const
-            } catch {
-              return [id, null] as const
-            }
-          }),
-        )
-        setProductMap((m) => ({ ...m, ...Object.fromEntries(entries) }))
-      }
-      // fetch branch details for displayed items
       const branchIds = Array.from(new Set(res.map((r) => r.branch_id))).filter(Boolean) as number[]
-      const missingBranches = branchIds.filter((id) => !(id in branchMap))
-      if (missingBranches.length) {
-        const bentries = await Promise.all(
-          missingBranches.map(async (id) => {
-            try {
-              const b = await branchesApi.getById(id, token)
-              return [id, b] as const
-            } catch {
-              return [id, null] as const
-            }
-          }),
-        )
-        setBranchMap((m) => ({ ...m, ...Object.fromEntries(bentries) }))
-      }
+      await Promise.all([fetchMissingProducts(ids), fetchMissingBranches(branchIds)])
     } catch (err) {
       const e = err as ApiError
       if (e instanceof ApiError) {
@@ -80,7 +98,8 @@ export function InventoryPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [filter, token, productMap, branchMap])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, token, fetchMissingProducts, fetchMissingBranches])
 
   useEffect(() => {
     let active = true
@@ -125,8 +144,6 @@ export function InventoryPage() {
 
   const canCreate = user?.permissions?.includes('inventory.create')
   const canAdjust = user?.permissions?.includes('inventory.adjust')
-
-  const rows = useMemo(() => items, [items])
 
   return (
     <div className="space-y-6">
@@ -187,7 +204,7 @@ export function InventoryPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {rows.map((i) => {
+                {pageItems.map((i) => {
                   const p = productMap[i.product_id]
                   return (
                     <tr key={i.id} className="hover:bg-slate-50 transition-colors">
@@ -221,6 +238,11 @@ export function InventoryPage() {
             </table>
           )}
         </div>
+          {!isLoading && pageItems.length > 0 ? (
+            <div className="mt-4 flex justify-center">
+              <PaginationControl currentPage={page} totalPages={totalPages} onPageChange={goToPage} />
+            </div>
+          ) : null}
       </div>
 
       {creating && (
