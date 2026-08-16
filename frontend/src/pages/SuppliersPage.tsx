@@ -7,6 +7,7 @@ import { SupplierForm } from '../components/suppliers/SupplierForm'
 import { ApiError } from '../lib/api'
 import { EditIcon,DeleteIcon,CreateIcon,CloseIcon,SearchIcon } from '../utils/iconsUtils'
 import { useConfirm } from '../utils/confirmUtils'
+import { usePagination, PaginationControl } from '../utils/paginationUtils'
 
 export function SuppliersPage() {
   const { user } = useAuth()
@@ -20,6 +21,8 @@ export function SuppliersPage() {
   const [submitting, setSubmitting] = useState(false)
 
   const token = readStoredAccessToken() ?? undefined
+  const rows = useMemo(() => suppliers, [suppliers])
+  const { page, totalPages, pageItems, goToPage, resetPage } = usePagination(rows, 10)
 
   const load = useCallback(async () => {
     setIsLoading(true)
@@ -30,6 +33,7 @@ export function SuppliersPage() {
       if (filter.active !== '') f.active = filter.active === 'true'
       const res = await suppliersApi.list(f, token)
       setSuppliers(res)
+      resetPage()
     } catch (err) {
       const e = err as ApiError
       if (e instanceof ApiError) {
@@ -112,7 +116,6 @@ export function SuppliersPage() {
   const canUpdate = isSuperAdmin || user?.permissions?.includes('suppliers.update')
   const canDelete = isSuperAdmin || user?.permissions?.includes('suppliers.delete')
 
-  const rows = useMemo(() => suppliers, [suppliers])
 
   return (
     <div className="space-y-6">
@@ -232,6 +235,11 @@ export function SuppliersPage() {
             </table>
           )}
         </div>
+        {!isLoading && pageItems.length > 0 ? (
+          <div className="mt-4 flex justify-center">
+            <PaginationControl currentPage={page} totalPages={totalPages} onPageChange={goToPage} />
+          </div>
+        ) : null}
       </div>
 
       {(creating || editing) && (
