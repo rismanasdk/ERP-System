@@ -52,48 +52,48 @@ export function ProductForm({ initial = {}, submitting = false, onSubmit, onCanc
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-slate-700">SKU</label>
-        <input value={sku} onChange={(e) => setSku(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+        <label htmlFor="product-sku" className="block text-sm font-medium text-slate-700">SKU</label>
+        <input id="product-sku" value={sku} onChange={(e) => setSku(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
         {errors.sku ? <p className="mt-1 text-sm text-red-600">{errors.sku}</p> : null}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-slate-700">Name</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+        <label htmlFor="product-name" className="block text-sm font-medium text-slate-700">Name</label>
+        <input id="product-name" value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
         {errors.name ? <p className="mt-1 text-sm text-red-600">{errors.name}</p> : null}
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div>
-          <label className="block text-sm font-medium text-slate-700">Barcode</label>
-          <input value={barcode ?? ''} onChange={(e) => setBarcode(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+          <label htmlFor="product-barcode" className="block text-sm font-medium text-slate-700">Barcode</label>
+          <input id="product-barcode" value={barcode ?? ''} onChange={(e) => setBarcode(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700">Category</label>
-          <input value={category ?? ''} onChange={(e) => setCategory(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+          <label htmlFor="product-category" className="block text-sm font-medium text-slate-700">Category</label>
+          <input id="product-category" value={category ?? ''} onChange={(e) => setCategory(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div>
-          <label className="block text-sm font-medium text-slate-700">Unit</label>
-          <input value={unit ?? ''} onChange={(e) => setUnit(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+          <label htmlFor="product-unit" className="block text-sm font-medium text-slate-700">Unit</label>
+          <input id="product-unit" value={unit ?? ''} onChange={(e) => setUnit(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700">Purchase Price</label>
-          <input value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} type="number" step="0.01" className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+          <label htmlFor="product-purchase-price" className="block text-sm font-medium text-slate-700">Purchase Price</label>
+          <input id="product-purchase-price" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} type="number" step="0.01" className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
           {errors.purchase_price ? <p className="mt-1 text-sm text-red-600">{errors.purchase_price}</p> : null}
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700">Selling Price</label>
-          <input value={sellingPrice} onChange={(e) => setSellingPrice(e.target.value)} type="number" step="0.01" className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
+          <label htmlFor="product-selling-price" className="block text-sm font-medium text-slate-700">Selling Price</label>
+          <input id="product-selling-price" value={sellingPrice} onChange={(e) => setSellingPrice(e.target.value)} type="number" step="0.01" className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />
           {errors.selling_price ? <p className="mt-1 text-sm text-red-600">{errors.selling_price}</p> : null}
         </div>
       </div>
 
       <div className="flex items-center gap-4">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+        <label htmlFor="product-active" className="flex items-center gap-2 text-sm">
+          <input id="product-active" type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
           <span>Active</span>
         </label>
       </div>

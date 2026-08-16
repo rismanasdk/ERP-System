@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider } from '../contexts/AuthContext'
+import { ConfirmDialogProvider } from '../utils/confirmUtils'
 import { SuppliersPage } from '../pages/SuppliersPage'
 
 vi.mock('../services/suppliers', () => ({
@@ -31,7 +32,9 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
@@ -47,7 +50,9 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
@@ -63,7 +68,9 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
@@ -79,7 +86,9 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
@@ -108,7 +117,9 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
@@ -128,7 +139,9 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
@@ -157,7 +170,9 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
@@ -187,7 +202,9 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
@@ -216,19 +233,23 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
 
     await waitFor(() => expect(screen.getByText('ToDelete')).toBeInTheDocument())
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const deleteMock = suppliersApi.softDelete as unknown as ReturnType<typeof vi.fn>
     deleteMock.mockResolvedValueOnce({ id: existing.id })
     listMock.mockResolvedValueOnce([])
 
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /delete/i }))
+    // confirm dialog appears, click Delete button inside it
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: /delete/i }))
 
     await waitFor(() => expect(screen.getByText(/no suppliers found/i)).toBeInTheDocument())
@@ -243,19 +264,22 @@ describe('SuppliersPage', () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <SuppliersPage />
+          <ConfirmDialogProvider>
+            <SuppliersPage />
+          </ConfirmDialogProvider>
         </AuthProvider>
       </MemoryRouter>,
     )
 
     await waitFor(() => expect(screen.getByText('ToDelete2')).toBeInTheDocument())
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const err = new ApiError(400, 'cannot delete', 'BAD')
     const deleteMock = suppliersApi.softDelete as unknown as ReturnType<typeof vi.fn>
     deleteMock.mockRejectedValueOnce(err)
 
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /delete/i }))
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: /delete/i }))
 
     await waitFor(() => expect(screen.getByText(/cannot delete/i)).toBeInTheDocument())

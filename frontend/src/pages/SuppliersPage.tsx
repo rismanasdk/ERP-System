@@ -5,11 +5,12 @@ import { suppliersApi } from '../services/suppliers'
 import { readStoredAccessToken } from '../services/authSession'
 import { SupplierForm } from '../components/suppliers/SupplierForm'
 import { ApiError } from '../lib/api'
-// Import icon sesuai utils yang disediakan
-import {EditIcon,DeleteIcon,CreateIcon,CloseIcon,SearchIcon } from '../utils/iconsUtils'
+import { EditIcon,DeleteIcon,CreateIcon,CloseIcon,SearchIcon } from '../utils/iconsUtils'
+import { useConfirm } from '../utils/confirmUtils'
 
 export function SuppliersPage() {
   const { user } = useAuth()
+  const confirmDialog = useConfirm()
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -86,7 +87,14 @@ export function SuppliersPage() {
   }, [editing, load, token])
 
   const onDelete = useCallback(async (id: number) => {
-    if (!confirm('Are you sure you want to delete this supplier?')) return
+    const ok = await confirmDialog({
+      title: 'Delete this Supplier?',
+      description: 'This action cannot be undone.',
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    })
+    if (!ok) return
+
     setSubmitting(true)
     try {
       await suppliersApi.softDelete(id, token)
@@ -97,7 +105,7 @@ export function SuppliersPage() {
     } finally {
       setSubmitting(false)
     }
-  }, [load, token])
+  }, [confirmDialog, load, token])
 
   const isSuperAdmin = user?.roles?.includes('SUPER_ADMIN')
   const canCreate = isSuperAdmin || user?.permissions?.includes('suppliers.create')
@@ -165,7 +173,6 @@ export function SuppliersPage() {
         </div>
 
         <div className="mt-4 overflow-auto">
-          {/* SKELETON LOADING DIPERTAHANKAN PERSIS SEPERTI ASLINYA */}
           {isLoading ? (
             <div className="space-y-2">
               <div className="h-8 w-1/3 rounded bg-slate-200" />
@@ -227,10 +234,8 @@ export function SuppliersPage() {
         </div>
       </div>
 
-      {/* POP UP MODAL UNTUK CREATE & EDIT */}
       {(creating || editing) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Backdrop / Overlay */}
           <div 
             className="absolute inset-0 bg-black/50 backdrop-blur-sm" 
             onClick={() => {
@@ -239,9 +244,7 @@ export function SuppliersPage() {
             }}
           />
           
-          {/* Modal Content */}
           <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-            {/* Header Modal */}
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-semibold text-slate-900">
                 {creating ? 'Create New Supplier' : 'Edit Supplier'}
@@ -257,7 +260,6 @@ export function SuppliersPage() {
               </button>
             </div>
             
-            {/* Form Modal */}
             <SupplierForm
               key={editing ? `edit-${editing.id}` : 'create'}
               initial={editing ?? undefined}

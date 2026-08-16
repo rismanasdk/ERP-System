@@ -13,6 +13,7 @@ import { SuppliersPage } from '../pages/SuppliersPage'
 import { PurchasesPage } from '../pages/PurchasesPage'
 import { InventoryPage } from '../pages/InventoryPage'
 import { SalesPage } from '../pages/SalesPage'
+import { ConfirmDialogProvider } from '../utils/confirmUtils'
 
 function AppRoutes() {
   const { isAuthenticated } = useAuth()
@@ -53,9 +54,11 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
+      <ConfirmDialogProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </ConfirmDialogProvider>
     </AuthProvider>
   )
 }
