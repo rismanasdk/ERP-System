@@ -31,4 +31,8 @@ export const customersApi = {
     const res = await api.delete<ApiEnvelope<{ id: number }>>(`/api/v1/customers/${id}`, token)
     return res.data
   },
+
+  remove: async (id: number, token?: string): Promise<{ id: number }> => {
+    return customersApi.softDelete(id, token)
+  },
 }

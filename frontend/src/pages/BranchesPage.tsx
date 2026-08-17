@@ -1,60 +1,53 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
-import type { Customer, CustomerFilter } from '../types/customer'
-import { customersApi } from '../services/customers'
+import type { Branch } from '../types/auth'
+import { branchesApi } from '../services/branches'
 import { readStoredAccessToken } from '../services/authSession'
-import { CustomerForm } from '../components/customers/CustomerForm'
+import { BranchForm } from '../components/branches/BranchForm'
 import { ApiError } from '../lib/api'
-import { CloseIcon, CreateIcon, DeleteIcon, EditIcon, SearchIcon, ViewIcon } from '../utils/iconsUtils'
+import { CreateIcon, DeleteIcon, EditIcon, SearchIcon, ViewIcon } from '../utils/iconsUtils'
 import { useConfirm } from '../utils/confirmUtils'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog'
 
-function formatNull(value?: string | null) {
-  return value ?? '-'
-}
-
-export function CustomersPage() {
+export function BranchesPage() {
   const { user } = useAuth()
   const confirmDialog = useConfirm()
-  const [customers, setCustomers] = useState<Customer[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState({ search: '', active: '' })
-  const [editing, setEditing] = useState<Customer | null>(null)
+  const [filterActive, setFilterActive] = useState('')
+  const [editing, setEditing] = useState<Branch | null>(null)
   const [creating, setCreating] = useState(false)
-  const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null)
+  const [detailBranch, setDetailBranch] = useState<Branch | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   const token = readStoredAccessToken() ?? undefined
-  const rows = useMemo(() => customers, [customers])
+  const rows = useMemo(() => branches, [branches])
 
   const isSuperAdmin = user?.roles?.includes('SUPER_ADMIN')
-  const canRead = isSuperAdmin || user?.permissions?.includes('customers.read')
-  const canCreate = isSuperAdmin || user?.permissions?.includes('customers.create')
-  const canUpdate = isSuperAdmin || user?.permissions?.includes('customers.update')
-  const canDelete = isSuperAdmin || user?.permissions?.includes('customers.delete')
+  const canRead = isSuperAdmin || user?.permissions?.includes('inventory.read')
+  const canCreate = isSuperAdmin || user?.permissions?.includes('inventory.create')
+  const canUpdate = isSuperAdmin || user?.permissions?.includes('inventory.adjust')
 
   const load = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     try {
-      const f: CustomerFilter = {}
-      if (filter.search) f.search = filter.search
-      if (filter.active !== '') f.active = filter.active === 'true'
-      const res = await customersApi.list(f, token)
-      setCustomers(res)
+      const active = filterActive === '' ? undefined : filterActive === 'true'
+      const res = await branchesApi.list(active, token)
+      setBranches(res)
     } catch (err) {
       const e = err as ApiError
       if (e instanceof ApiError) {
         if (e.status === 401) return setError('Session expired. Please sign in again.')
-        if (e.status === 403) return setError('You do not have access to customers.')
+        if (e.status === 403) return setError('You do not have access to branches.')
         return setError(e.message)
       }
-      setError('Unable to load customers')
+      setError('Unable to load branches')
     } finally {
       setIsLoading(false)
     }
-  }, [filter, token])
+  }, [filterActive, token])
 
   useEffect(() => {
     let active = true
@@ -70,18 +63,18 @@ export function CustomersPage() {
 
   const handleView = useCallback(async (id: number) => {
     try {
-      const detail = await customersApi.getById(id, token)
-      setDetailCustomer(detail)
+      const detail = await branchesApi.getById(id, token)
+      setDetailBranch(detail)
     } catch (err) {
       const e = err as ApiError
       setError(e.message)
     }
   }, [token])
 
-  const onCreate = useCallback(async (payload: Partial<Customer>) => {
+  const onCreate = useCallback(async (payload: Partial<Branch>) => {
     setSubmitting(true)
     try {
-      await customersApi.create(payload, token)
+      await branchesApi.create(payload, token)
       setCreating(false)
       await load()
     } catch (err) {
@@ -93,11 +86,11 @@ export function CustomersPage() {
     }
   }, [load, token])
 
-  const onUpdate = useCallback(async (payload: Partial<Customer>) => {
+  const onUpdate = useCallback(async (payload: Partial<Branch>) => {
     if (!editing) return
     setSubmitting(true)
     try {
-      await customersApi.update(editing.id, payload, token)
+      await branchesApi.update(editing.id, payload, token)
       setEditing(null)
       await load()
     } catch (err) {
@@ -110,9 +103,12 @@ export function CustomersPage() {
   }, [editing, load, token])
 
   const onDeactivate = useCallback(async (id: number) => {
+    const branch = branches.find((item) => item.id === id)
+    if (!branch) return
+
     const ok = await confirmDialog({
-      title: 'Deactivate this customer?',
-      description: 'This action will mark the customer as inactive and soft-delete it from the active list.',
+      title: 'Deactivate this branch?',
+      description: 'This action will set the branch to inactive.',
       confirmLabel: 'Deactivate',
       variant: 'destructive',
     })
@@ -120,7 +116,7 @@ export function CustomersPage() {
 
     setSubmitting(true)
     try {
-      await customersApi.remove(id, token)
+      await branchesApi.update(id, { name: branch.name, code: branch.code, is_active: false }, token)
       await load()
     } catch (err) {
       const e = err as ApiError
@@ -128,15 +124,23 @@ export function CustomersPage() {
     } finally {
       setSubmitting(false)
     }
-  }, [confirmDialog, load, token])
+  }, [branches, confirmDialog, load, token])
+
+  if (!canRead) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">
+        You do not have permission to view branches.
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium uppercase tracking-[0.2em] text-indigo-600">CUSTOMERS</p>
-          <h2 className="mt-1 text-2xl font-bold text-slate-900">Customers</h2>
-          <p className="mt-2 text-sm text-slate-600">Manage customer master data.</p>
+          <p className="text-sm font-medium uppercase tracking-[0.2em] text-indigo-600">BRANCHES</p>
+          <h2 className="mt-1 text-2xl font-bold text-slate-900">Branches</h2>
+          <p className="mt-2 text-sm text-slate-600">Manage operational branches and access scope.</p>
         </div>
         <div className="flex items-center gap-3">
           {canCreate ? (
@@ -168,16 +172,16 @@ export function CustomersPage() {
           <div className="relative max-w-sm flex-1">
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
-              value={filter.search}
-              onChange={(e) => setFilter((current) => ({ ...current, search: e.target.value }))}
-              placeholder="Search by code or name"
-              className="w-full rounded-md border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              value={filterActive === '' ? '' : filterActive}
+              readOnly
+              placeholder="Status filter"
+              className="w-full rounded-md border border-slate-200 pl-9 pr-3 py-2 text-sm text-slate-500 bg-slate-50"
             />
           </div>
 
           <select
-            value={filter.active}
-            onChange={(e) => setFilter((current) => ({ ...current, active: e.target.value }))}
+            value={filterActive}
+            onChange={(e) => setFilterActive(e.target.value)}
             className="rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <option value="">All</option>
@@ -202,7 +206,7 @@ export function CustomersPage() {
             </div>
           ) : rows.length === 0 ? (
             <div className="p-6 text-center text-sm text-slate-500">
-              {filter.search || filter.active !== '' ? 'No customers match the current filter.' : 'No customers found.'}
+              {filterActive ? 'No branches match the current filter.' : 'No branches found.'}
             </div>
           ) : (
             <table className="min-w-full table-auto">
@@ -210,24 +214,18 @@ export function CustomersPage() {
                 <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wider text-slate-500">
                   <th className="px-3 py-3">Code</th>
                   <th className="px-3 py-3">Name</th>
-                  <th className="px-3 py-3">Phone</th>
-                  <th className="px-3 py-3">Email</th>
-                  <th className="px-3 py-3">Tax ID</th>
                   <th className="px-3 py-3">Status</th>
                   <th className="px-3 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {rows.map((customer) => (
-                  <tr key={customer.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-3 py-3 text-sm font-medium text-slate-900">{customer.code}</td>
-                    <td className="px-3 py-3 text-sm text-slate-700">{customer.name}</td>
-                    <td className="px-3 py-3 text-sm text-slate-500">{formatNull(customer.phone)}</td>
-                    <td className="px-3 py-3 text-sm text-slate-500">{formatNull(customer.email)}</td>
-                    <td className="px-3 py-3 text-sm text-slate-500">{formatNull(customer.tax_id)}</td>
+                {rows.map((branch) => (
+                  <tr key={branch.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-3 py-3 text-sm font-medium text-slate-900">{branch.code}</td>
+                    <td className="px-3 py-3 text-sm text-slate-700">{branch.name}</td>
                     <td className="px-3 py-3 text-sm">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${customer.is_active ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-700'}`}>
-                        {customer.is_active ? 'Active' : 'Inactive'}
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${branch.is_active ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-700'}`}>
+                        {branch.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
                     <td className="px-3 py-3 text-right">
@@ -235,7 +233,7 @@ export function CustomersPage() {
                         {canRead ? (
                           <button
                             type="button"
-                            onClick={() => void handleView(customer.id)}
+                            onClick={() => void handleView(branch.id)}
                             className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
                           >
                             <ViewIcon className="h-3.5 w-3.5" />
@@ -245,17 +243,17 @@ export function CustomersPage() {
                         {canUpdate ? (
                           <button
                             type="button"
-                            onClick={() => setEditing(customer)}
+                            onClick={() => setEditing(branch)}
                             className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
                           >
                             <EditIcon className="h-3.5 w-3.5" />
                             Edit
                           </button>
                         ) : null}
-                        {canDelete && customer.is_active ? (
+                        {canUpdate && branch.is_active ? (
                           <button
                             type="button"
-                            onClick={() => void onDeactivate(customer.id)}
+                            onClick={() => void onDeactivate(branch.id)}
                             className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
                           >
                             <DeleteIcon className="h-3.5 w-3.5" />
@@ -272,62 +270,41 @@ export function CustomersPage() {
         </div>
       </div>
 
-      <Dialog open={Boolean(detailCustomer)} onOpenChange={(open) => !open && setDetailCustomer(null)}>
+      <Dialog open={Boolean(detailBranch)} onOpenChange={(open) => !open && setDetailBranch(null)}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Customer Details</DialogTitle>
-            <DialogDescription>View customer master data.</DialogDescription>
+            <DialogTitle>Branch Details</DialogTitle>
+            <DialogDescription>View branch operational details.</DialogDescription>
           </DialogHeader>
 
-          {detailCustomer ? (
+          {detailBranch ? (
             <div className="space-y-3 text-sm">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <p className="text-slate-500">Code</p>
-                  <p className="font-medium text-slate-900">{detailCustomer.code}</p>
+                  <p className="font-medium text-slate-900">{detailBranch.code}</p>
                 </div>
                 <div>
                   <p className="text-slate-500">Status</p>
-                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${detailCustomer.is_active ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-700'}`}>
-                    {detailCustomer.is_active ? 'Active' : 'Inactive'}
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${detailBranch.is_active ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-700'}`}>
+                    {detailBranch.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
               </div>
 
               <div>
                 <p className="text-slate-500">Name</p>
-                <p className="font-medium text-slate-900">{detailCustomer.name}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-slate-500">Phone</p>
-                  <p className="text-slate-900">{formatNull(detailCustomer.phone)}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Email</p>
-                  <p className="text-slate-900">{formatNull(detailCustomer.email)}</p>
-                </div>
-              </div>
-
-              <div>
-                <p className="text-slate-500">Address</p>
-                <p className="text-slate-900">{formatNull(detailCustomer.address)}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-500">Tax ID</p>
-                <p className="text-slate-900">{formatNull(detailCustomer.tax_id)}</p>
+                <p className="font-medium text-slate-900">{detailBranch.name}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <p className="text-slate-500">Created</p>
-                  <p className="text-slate-900">{detailCustomer.created_at ? new Date(detailCustomer.created_at).toLocaleString('id-ID') : '-'}</p>
+                  <p className="text-slate-900">{detailBranch.created_at ? new Date(detailBranch.created_at).toLocaleString('id-ID') : '-'}</p>
                 </div>
                 <div>
                   <p className="text-slate-500">Updated</p>
-                  <p className="text-slate-900">{detailCustomer.updated_at ? new Date(detailCustomer.updated_at).toLocaleString('id-ID') : '-'}</p>
+                  <p className="text-slate-900">{detailBranch.updated_at ? new Date(detailBranch.updated_at).toLocaleString('id-ID') : '-'}</p>
                 </div>
               </div>
             </div>
@@ -336,7 +313,7 @@ export function CustomersPage() {
           <DialogFooter>
             <button
               type="button"
-              onClick={() => setDetailCustomer(null)}
+              onClick={() => setDetailBranch(null)}
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
             >
               Close
@@ -351,11 +328,11 @@ export function CustomersPage() {
           setEditing(null)
         }
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-xl">
           <DialogHeader className="flex items-center justify-between">
             <div>
-              <DialogTitle>{creating ? 'Create Customer' : 'Edit Customer'}</DialogTitle>
-              <DialogDescription>{creating ? 'Create a new customer master record.' : 'Update customer details.'}</DialogDescription>
+              <DialogTitle>{creating ? 'Create Branch' : 'Edit Branch'}</DialogTitle>
+              <DialogDescription>{creating ? 'Create a branch record.' : 'Update branch details.'}</DialogDescription>
             </div>
             <button
               type="button"
@@ -365,11 +342,10 @@ export function CustomersPage() {
               }}
               className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
             >
-              <CloseIcon className="h-5 w-5" />
             </button>
           </DialogHeader>
 
-          <CustomerForm
+          <BranchForm
             key={editing ? `edit-${editing.id}` : 'create'}
             initial={editing ?? undefined}
             submitting={submitting}

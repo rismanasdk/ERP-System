@@ -182,7 +182,7 @@ describe('InventoryPage', () => {
     await user.click(screen.getByRole('button', { name: /view/i }))
     await waitFor(() => expect(screen.getByText(/inventory detail/i)).toBeInTheDocument())
     const dialog = screen.getByRole('dialog')
-    const { getByText: getByTextWithin } = require('@testing-library/dom')
+    const { getByText: getByTextWithin } = await import('@testing-library/dom')
     expect(getByTextWithin(dialog, 'BranchX')).toBeInTheDocument()
     expect(getByTextWithin(dialog, '7')).toBeInTheDocument()
   })
