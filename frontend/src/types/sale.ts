@@ -36,3 +36,7 @@ export type CreateSaleInput = {
   notes?: string | null
   items: CreateSaleItemInput[]
 }
+
+export type SaleWithItems = Sale & {
+  items?: SaleItem[]
+}

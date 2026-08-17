@@ -5,13 +5,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../lib/api'
 import { AuthProvider } from '../contexts/AuthContext'
 import { CustomersPage } from '../pages/CustomersPage'
+import { ConfirmDialogProvider } from '../utils/confirmUtils'
 
 vi.mock('../services/customers', () => ({
   customersApi: {
     list: vi.fn(),
+    getById: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
     softDelete: vi.fn(),
+    remove: vi.fn(),
   },
 }))
 
@@ -22,243 +25,256 @@ afterEach(() => {
   vi.resetAllMocks()
 })
 
-describe('CustomersPage', () => {
-  it('renders loading and then list', async () => {
-    const fake = [{ id: 1, code: 'C001', name: 'ACME', is_active: true }]
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockResolvedValueOnce(fake)
-
-    render(
-      <MemoryRouter>
-        <AuthProvider>
+function renderCustomersPage() {
+  return render(
+    <MemoryRouter>
+      <AuthProvider>
+        <ConfirmDialogProvider>
           <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
+        </ConfirmDialogProvider>
+      </AuthProvider>
+    </MemoryRouter>,
+  )
+}
+
+describe('CustomersPage', () => {
+  it('renders customer list', async () => {
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([{ id: 1, code: 'C001', name: 'ACME', is_active: true }])
+
+    renderCustomersPage()
 
     expect(screen.getByPlaceholderText(/search by code or name/i)).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('ACME')).toBeInTheDocument())
   })
 
-  it('shows empty state', async () => {
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockResolvedValueOnce([])
+  it('shows loading state', () => {
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockReturnValue(new Promise(() => {}))
 
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
+    renderCustomersPage()
+
+    expect(screen.getByPlaceholderText(/search by code or name/i)).toBeInTheDocument()
+  })
+
+  it('shows empty state', async () => {
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([])
+
+    renderCustomersPage()
 
     await waitFor(() => expect(screen.getByText(/no customers found/i)).toBeInTheDocument())
   })
 
-  it('shows error when list fails with 403', async () => {
-    const err = new ApiError(403, 'forbidden', 'FORBIDDEN')
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockRejectedValueOnce(err)
+  it('filters by exact search field', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([])
 
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
+    const user = userEvent.setup()
+    renderCustomersPage()
 
-    await waitFor(() => expect(screen.getByText(/you do not have access to customers/i)).toBeInTheDocument())
+    const searchInput = await screen.findByPlaceholderText(/search by code or name/i)
+    await user.type(searchInput, 'ACME')
+    await user.click(screen.getByRole('button', { name: /apply/i }))
+
+    await waitFor(() => {
+      expect(listMock).toHaveBeenLastCalledWith({ search: 'ACME' }, undefined)
+    })
+  })
+
+  it('filters active=true', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([])
+
+    const user = userEvent.setup()
+    renderCustomersPage()
+
+    const statusSelect = await screen.findByRole('combobox')
+    await user.selectOptions(statusSelect, 'true')
+    await user.click(screen.getByRole('button', { name: /apply/i }))
+
+    await waitFor(() => {
+      expect(listMock).toHaveBeenLastCalledWith({ active: true }, undefined)
+    })
+  })
+
+  it('filters active=false', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([])
+
+    const user = userEvent.setup()
+    renderCustomersPage()
+
+    const statusSelect = await screen.findByRole('combobox')
+    await user.selectOptions(statusSelect, 'false')
+    await user.click(screen.getByRole('button', { name: /apply/i }))
+
+    await waitFor(() => {
+      expect(listMock).toHaveBeenLastCalledWith({ active: false }, undefined)
+    })
   })
 
   it('allows creating a customer successfully', async () => {
     localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create'] }))
-    const newCustomer = { id: 2, code: 'C002', name: 'NewCo', is_active: true }
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockResolvedValueOnce([]) // initial
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([])
 
-    await waitFor(() => expect(screen.getByText(/no customers found/i)).toBeInTheDocument())
+    const createMock = customersApi.create as ReturnType<typeof vi.fn>
+    const newCustomer = { id: 2, code: 'C002', name: 'NewCo', is_active: true }
+    createMock.mockResolvedValue(newCustomer)
 
     const user = userEvent.setup()
-    // prepare create + refreshed list
-    const createMock = customersApi.create as unknown as ReturnType<typeof vi.fn>
-    createMock.mockResolvedValueOnce(newCustomer)
-    listMock.mockResolvedValueOnce([newCustomer])
+    renderCustomersPage()
 
     await user.click(screen.getByRole('button', { name: /create/i }))
     await user.type(screen.getByLabelText(/code/i), newCustomer.code)
     await user.type(screen.getByLabelText(/name/i), newCustomer.name)
-    await user.click(screen.getByRole('button', { name: /save/i }))
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
 
-    await waitFor(() => expect(screen.getByText('NewCo')).toBeInTheDocument())
+    await waitFor(() => {
+      expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ code: 'C002', name: 'NewCo' }), undefined)
+    })
   })
 
-  it('shows validation errors on empty create form', async () => {
+  it('validates required code and name', async () => {
     localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create'] }))
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockResolvedValueOnce([])
-    const user = userEvent.setup()
-
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText(/no customers found/i)).toBeInTheDocument())
-    await user.click(screen.getByRole('button', { name: /create/i }))
-    await user.click(screen.getByRole('button', { name: /save/i }))
-
-    expect(screen.getByText(/code is required/i)).toBeInTheDocument()
-    expect(screen.getByText(/name is required/i)).toBeInTheDocument()
-  })
-
-  it('shows API error when create fails', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create'] }))
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockResolvedValueOnce([])
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText(/no customers found/i)).toBeInTheDocument())
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([])
 
     const user = userEvent.setup()
-    const createMock = customersApi.create as unknown as ReturnType<typeof vi.fn>
-    const err = new ApiError(400, 'bad request', 'BAD')
-    createMock.mockRejectedValueOnce(err)
+    renderCustomersPage()
 
     await user.click(screen.getByRole('button', { name: /create/i }))
-    await user.type(screen.getByLabelText(/code/i), 'X001')
-    await user.type(screen.getByLabelText(/name/i), 'FailCo')
-    await user.click(screen.getByRole('button', { name: /save/i }))
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
 
-    await waitFor(() => expect(screen.getByText(/bad request/i)).toBeInTheDocument())
+    await waitFor(() => {
+      expect(screen.getByText(/code is required/i)).toBeInTheDocument()
+      expect(screen.getByText(/name is required/i)).toBeInTheDocument()
+    })
   })
 
   it('allows updating a customer', async () => {
     localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.update'] }))
     const existing = { id: 3, code: 'C003', name: 'OldName', is_active: true }
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockResolvedValueOnce([existing])
 
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([existing])
+
+    const updateMock = customersApi.update as ReturnType<typeof vi.fn>
+    updateMock.mockResolvedValue({ ...existing, name: 'NewName' })
+
+    const user = userEvent.setup()
+    renderCustomersPage()
 
     await waitFor(() => expect(screen.getByText('OldName')).toBeInTheDocument())
-    const user = userEvent.setup()
-
-    const updateMock = customersApi.update as unknown as ReturnType<typeof vi.fn>
-    updateMock.mockResolvedValueOnce({ ...existing, name: 'NewName' })
-    listMock.mockResolvedValueOnce([{ ...existing, name: 'NewName' }])
-
     await user.click(screen.getByRole('button', { name: /edit/i }))
     const nameInput = screen.getByLabelText(/name/i)
     await user.clear(nameInput)
     await user.type(nameInput, 'NewName')
-    await user.click(screen.getByRole('button', { name: /save/i }))
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
 
-    await waitFor(() => expect(screen.getByText('NewName')).toBeInTheDocument())
+    await waitFor(() => {
+      expect(updateMock).toHaveBeenCalledWith(3, expect.objectContaining({ name: 'NewName' }), undefined)
+    })
   })
 
-  it('shows API error when update fails', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.update'] }))
-    const existing = { id: 4, code: 'C004', name: 'Name4', is_active: true }
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockResolvedValueOnce([existing])
-
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Name4')).toBeInTheDocument())
-    const user = userEvent.setup()
-
-    const err = new ApiError(400, 'duplicate code', 'BAD')
-    const updateMock = customersApi.update as unknown as ReturnType<typeof vi.fn>
-    updateMock.mockRejectedValueOnce(err)
-
-    await user.click(screen.getByRole('button', { name: /edit/i }))
-    await user.clear(screen.getByLabelText(/name/i))
-    await user.type(screen.getByLabelText(/name/i), 'NewName')
-    await user.click(screen.getByRole('button', { name: /save/i }))
-
-    await waitFor(() => expect(screen.getByText(/duplicate code/i)).toBeInTheDocument())
-  })
-
-  it('allows deleting (soft-delete) a customer', async () => {
+  it('soft-deletes by deactivating an active customer', async () => {
     localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.delete'] }))
     const existing = { id: 5, code: 'C005', name: 'ToDelete', is_active: true }
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockResolvedValueOnce([existing])
 
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([existing])
+
+    const removeMock = customersApi.remove as ReturnType<typeof vi.fn>
+    removeMock.mockResolvedValue({ id: existing.id })
+
+    const user = userEvent.setup()
+    renderCustomersPage()
 
     await waitFor(() => expect(screen.getByText('ToDelete')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /deactivate/i }))
+    await user.click(screen.getByRole('button', { name: /^Deactivate$/i }))
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const deleteMock = customersApi.softDelete as unknown as ReturnType<typeof vi.fn>
-    deleteMock.mockResolvedValueOnce({ id: existing.id })
-    listMock.mockResolvedValueOnce([])
-
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: /delete/i }))
-
-    await waitFor(() => expect(screen.getByText(/no customers found/i)).toBeInTheDocument())
+    await waitFor(() => {
+      expect(removeMock).toHaveBeenCalledWith(5, undefined)
+    })
   })
 
-  it('shows API error when delete fails', async () => {
+  it('hides deactivate button for inactive customer', async () => {
     localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.delete'] }))
-    const existing = { id: 6, code: 'C006', name: 'ToDelete2', is_active: true }
-    const listMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
-    listMock.mockResolvedValueOnce([existing])
+    const existing = { id: 6, code: 'C006', name: 'InactiveCustomer', is_active: false }
 
-    render(
-      <MemoryRouter>
-        <AuthProvider>
-          <CustomersPage />
-        </AuthProvider>
-      </MemoryRouter>,
-    )
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([existing])
 
-    await waitFor(() => expect(screen.getByText('ToDelete2')).toBeInTheDocument())
+    renderCustomersPage()
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const err = new ApiError(400, 'cannot delete', 'BAD')
-    const deleteMock = customersApi.softDelete as unknown as ReturnType<typeof vi.fn>
-    deleteMock.mockRejectedValueOnce(err)
+    await waitFor(() => expect(screen.getByText('InactiveCustomer')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /deactivate/i })).not.toBeInTheDocument()
+  })
+
+  it('shows session expired state', async () => {
+    const err = new ApiError(401, 'Session expired', 'UNAUTHORIZED')
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockRejectedValueOnce(err)
+
+    renderCustomersPage()
+
+    await waitFor(() => expect(screen.getByText(/session expired/i)).toBeInTheDocument())
+  })
+
+  it('shows permission denied state', async () => {
+    const err = new ApiError(403, 'forbidden', 'FORBIDDEN')
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockRejectedValueOnce(err)
+
+    renderCustomersPage()
+
+    await waitFor(() => expect(screen.getByText(/you do not have access to customers/i)).toBeInTheDocument())
+  })
+
+  it('shows duplicate-code API error', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create'] }))
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([])
+
+    const createMock = customersApi.create as ReturnType<typeof vi.fn>
+    createMock.mockRejectedValueOnce(new ApiError(400, 'customer code already exists', 'INVALID_REQUEST'))
 
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: /delete/i }))
+    renderCustomersPage()
 
-    await waitFor(() => expect(screen.getByText(/cannot delete/i)).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /create/i }))
+    await user.type(screen.getByLabelText(/code/i), 'DUP')
+    await user.type(screen.getByLabelText(/name/i), 'DupCustomer')
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(screen.getByText(/customer code already exists/i)).toBeInTheDocument())
+  })
+
+  it('shows generic API error', async () => {
+    const err = new ApiError(500, 'Server error', 'INTERNAL_SERVER_ERROR')
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockRejectedValueOnce(err)
+
+    renderCustomersPage()
+
+    await waitFor(() => expect(screen.getByText(/server error/i)).toBeInTheDocument())
+  })
+
+  it('hides create, edit, and deactivate when permissions are absent', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: [] }))
+    const listMock = customersApi.list as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([{ id: 1, code: 'C001', name: 'ACME', is_active: true }])
+
+    renderCustomersPage()
+
+    await waitFor(() => expect(screen.getByText('ACME')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /create/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /deactivate/i })).not.toBeInTheDocument()
   })
 })

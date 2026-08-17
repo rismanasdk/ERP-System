@@ -5,6 +5,7 @@ import {
   DashboardIcon,
   ProductsIcon,
   CustomersIcon,
+  BranchIcon,
   SuppliersIcon,
   InventoryIcon,
   PurchaseIcon,
@@ -15,6 +16,7 @@ import {
 const navItems = [
   { label: 'Dashboard', to: '/dashboard', icon: DashboardIcon },
   { label: 'Products', to: '/products', icon: ProductsIcon },
+  { label: 'Branch', to: '/branches', icon: BranchIcon },
   { label: 'Customers', to: '/customers', icon: CustomersIcon },
   { label: 'Suppliers', to: '/suppliers', icon: SuppliersIcon },
   { label: 'Inventory', to: '/inventory', icon: InventoryIcon },

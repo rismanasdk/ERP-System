@@ -15,4 +15,14 @@ export const branchesApi = {
     const res = await api.get<ApiEnvelope<Branch>>(`/api/v1/branches/${id}`, token)
     return res.data
   },
+
+  create: async (payload: Partial<Branch>, token?: string): Promise<Branch> => {
+    const res = await api.post<ApiEnvelope<Branch>>('/api/v1/branches', payload, token)
+    return res.data
+  },
+
+  update: async (id: number, payload: Partial<Branch>, token?: string): Promise<Branch> => {
+    const res = await api.put<ApiEnvelope<Branch>>(`/api/v1/branches/${id}`, payload, token)
+    return res.data
+  },
 }

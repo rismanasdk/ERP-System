@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   Pagination,
   PaginationContent,
@@ -9,23 +9,25 @@ import {
   PaginationPrevious,
 } from '../components/ui/pagination'
 
-export function usePagination<T>(data: T[], perPage = 10) {
+/* eslint-disable react-refresh/only-export-components */
+export function usePagination<T>(data: T[] | undefined, perPage = 10) {
+  const safeData = useMemo(() => data ?? [], [data])
   const [page, setPage] = useState(1)
 
-  const totalPages = Math.max(1, Math.ceil(data.length / perPage))
+  const totalPages = Math.max(1, Math.ceil(safeData.length / perPage))
 
   const safePage = Math.min(page, totalPages)
 
   const pageItems = useMemo(() => {
     const start = (safePage - 1) * perPage
-    return data.slice(start, start + perPage)
-  }, [data, safePage, perPage])
+    return safeData.slice(start, start + perPage)
+  }, [safeData, safePage, perPage])
 
-  const goToPage = (p: number) => {
+  const goToPage = useCallback((p: number) => {
     setPage(Math.min(Math.max(1, p), totalPages))
-  }
+  }, [totalPages])
 
-  const resetPage = () => setPage(1)
+  const resetPage = useCallback(() => setPage(1), [])
 
   return {
     page: safePage,

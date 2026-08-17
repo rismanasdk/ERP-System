@@ -25,6 +25,7 @@ export {
   // Domain-specific
   LayoutDashboard as DashboardIcon,
   Package as ProductsIcon,
+  Building2 as BranchIcon,
   Users as CustomersIcon,
   Truck as SuppliersIcon,
   Warehouse as InventoryIcon,
@@ -33,7 +34,6 @@ export {
   FileText as ReportsIcon,
   Shield as RoleIcon,
   ClipboardList as AuditLogIcon,
-  Building2 as BranchIcon,
   LogOut as LogoutIcon,
   KeyRound as AuthIcon,
 } from 'lucide-react'
