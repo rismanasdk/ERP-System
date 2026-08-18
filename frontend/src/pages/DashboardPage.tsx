@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
+import { useBranch } from '../contexts/BranchContext'
 import { api, ApiError } from '../lib/api'
 import type { DashboardSummary } from '../types/dashboard'
 import { readStoredAccessToken } from '../services/authSession'
@@ -64,6 +65,7 @@ function ErrorState({ message, retry }: { message: string; retry?: () => void })
 
 export function DashboardPage() {
   const { user } = useAuth()
+  const { selectedBranch, isAllBranches } = useBranch()
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -74,7 +76,8 @@ export function DashboardPage() {
 
     try {
       const token = readStoredAccessToken() ?? undefined
-      const data = await api.getDashboardSummary<DashboardSummary>(token)
+      const branchId = selectedBranch && selectedBranch.id > 0 ? selectedBranch.id : undefined
+      const data = await api.getDashboardSummary<DashboardSummary>(token, branchId)
       setSummary(data)
     } catch (err) {
       const apiError = err as ApiError
@@ -105,7 +108,8 @@ export function DashboardPage() {
 
       try {
         const token = readStoredAccessToken() ?? undefined
-        const data = await api.getDashboardSummary<DashboardSummary>(token)
+        const branchId = selectedBranch && selectedBranch.id > 0 ? selectedBranch.id : undefined
+        const data = await api.getDashboardSummary<DashboardSummary>(token, branchId)
         if (isActive) {
           setSummary(data)
         }
@@ -140,7 +144,7 @@ export function DashboardPage() {
     return () => {
       isActive = false
     }
-  }, [])
+  }, [selectedBranch])
 
   const metrics = useMemo(() => {
     const sales = summary?.sales ?? null
@@ -162,7 +166,7 @@ export function DashboardPage() {
     }
   }, [summary])
 
-  const branchLabel = user?.roles?.includes('SUPER_ADMIN') ? 'All active branches' : 'Your assigned branch'
+  const branchLabel = isAllBranches ? 'All active branches' : selectedBranch?.name ?? 'Your assigned branch'
 
   return (
     <div className="space-y-6">

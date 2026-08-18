@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { LogoutIcon } from '../../utils/iconsUtils'
+import { BranchSelector } from './BranchSelector'
 import {
   DashboardIcon,
   ProductsIcon,
@@ -10,12 +11,16 @@ import {
   InventoryIcon,
   PurchaseIcon,
   SalesIcon,
-  ReportsIcon
+  ReportsIcon,
+  OrganizationIcon,
+  UsersIcon,
 } from '../../utils/iconsUtils'
 
 const navItems = [
   { label: 'Dashboard', to: '/dashboard', icon: DashboardIcon },
   { label: 'Products', to: '/products', icon: ProductsIcon },
+  { label: 'Organization', to: '/organization', icon: OrganizationIcon },
+  { label: 'Users', to: '/users', icon: UsersIcon },
   { label: 'Branch', to: '/branches', icon: BranchIcon },
   { label: 'Customers', to: '/customers', icon: CustomersIcon },
   { label: 'Suppliers', to: '/suppliers', icon: SuppliersIcon },
@@ -73,7 +78,8 @@ export function AppShell() {
             <h1 className="text-lg font-semibold text-slate-800">ERP Workspace</h1>
           </div>
           <div className="flex items-center gap-4">
-            <div className="mb-3 px-3 text-sm font-medium text-slate-700 truncate">
+            <BranchSelector />
+            <div className="px-3 text-sm font-medium text-slate-700 truncate">
               {user?.name ?? user?.email ?? 'User'}
             </div>
           </div>

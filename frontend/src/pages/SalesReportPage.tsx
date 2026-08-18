@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useBranch } from '../contexts/BranchContext'
 import { branchesApi } from '../services/branches'
 import { salesReportsApi } from '../services/reports'
 import { readStoredAccessToken } from '../services/authSession'
@@ -48,6 +49,7 @@ function LoadingCard() {
 }
 
 export function SalesReportPage() {
+  const { selectedBranch, isAllBranches } = useBranch()
   const token = readStoredAccessToken() ?? undefined
   const defaultRange = useMemo(() => getDefaultRange(), [])
   const [report, setReport] = useState<SalesReport | null>(null)
@@ -86,7 +88,9 @@ export function SalesReportPage() {
       const payload = {
         start_date: nextFilter.start_date,
         end_date: nextFilter.end_date,
-        branch_id: nextFilter.branch_id ? Number(nextFilter.branch_id) : undefined,
+        branch_id: selectedBranch && selectedBranch.id > 0 && !isAllBranches
+          ? selectedBranch.id
+          : nextFilter.branch_id ? Number(nextFilter.branch_id) : undefined,
       }
       const data = await salesReportsApi.get(payload, token)
       setReport(data)
@@ -108,7 +112,7 @@ export function SalesReportPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [token])
+  }, [isAllBranches, selectedBranch, token])
 
   useEffect(() => {
     void (async () => {

@@ -4,7 +4,7 @@ export {
   Plus as CreateIcon,
   Eye as ViewIcon,
   X as CloseIcon,
-  Check as CheckIcon,
+  Check as CompleteIcon,
   Save as SaveIcon,
 
   // Navigation & UI
@@ -26,14 +26,17 @@ export {
   LayoutDashboard as DashboardIcon,
   Package as ProductsIcon,
   Building2 as BranchIcon,
-  Users as CustomersIcon,
+  UserRound as CustomersIcon,
   Truck as SuppliersIcon,
   Warehouse as InventoryIcon,
   ShoppingCart as PurchaseIcon,
   TrendingUp as SalesIcon,
   FileText as ReportsIcon,
   Shield as RoleIcon,
+  Network as OrganizationIcon,
+  UsersRound as UsersIcon,
   ClipboardList as AuditLogIcon,
   LogOut as LogoutIcon,
   KeyRound as AuthIcon,
 } from 'lucide-react'
+

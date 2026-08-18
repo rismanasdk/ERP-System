@@ -9,11 +9,11 @@ import (
 )
 
 type mockAuditRepo struct {
-	createCalled      bool
+	createCalled       bool
 	createWithTxCalled bool
-	lastAuditLog      AuditLog
-	returnID          int64
-	returnErr         error
+	lastAuditLog       AuditLog
+	returnID           int64
+	returnErr          error
 }
 
 func (m *mockAuditRepo) Create(ctx context.Context, auditLog AuditLog) (int64, error) {
