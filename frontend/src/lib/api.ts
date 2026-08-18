@@ -102,12 +102,14 @@ export const api = {
   },
 
   refresh: async (refreshToken: string): Promise<RefreshResponse> => {
-    const response = await api.post<ApiEnvelope<RefreshResponse>>('/api/v1/auth/refresh', { refresh_token: refreshToken })
-    return response.data
+    // Call refresh without retryOnUnauthorized to avoid infinite refresh loop when refresh fails
+    const res = await request<ApiEnvelope<RefreshResponse>>('/api/v1/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }), headers: { 'Content-Type': 'application/json' } }, undefined, false)
+    return res.data
   },
 
-  getDashboardSummary: async <T>(token?: string): Promise<T> => {
-    const response = await api.get<ApiEnvelope<T>>('/api/v1/dashboard/summary', token)
+  getDashboardSummary: async <T>(token?: string, branchId?: number): Promise<T> => {
+    const query = branchId && branchId > 0 ? `?branch_id=${branchId}` : ''
+    const response = await api.get<ApiEnvelope<T>>(`/api/v1/dashboard/summary${query}`, token)
     return response.data
   },
 }

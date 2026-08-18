@@ -32,8 +32,8 @@ func (f *fakeIdentityProvider) GetIdentity(ctx context.Context, userID int64) (*
 
 type spyHub struct {
 	*Hub
-	mu          sync.Mutex
-	registered  []*Client
+	mu           sync.Mutex
+	registered   []*Client
 	unregistered []*Client
 }
 

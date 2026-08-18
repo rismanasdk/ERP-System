@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
+import { useBranch } from '../contexts/BranchContext'
 import type { Inventory } from '../types/inventory'
 import { inventoryApi } from '../services/inventory'
 import { readStoredAccessToken } from '../services/authSession'
@@ -10,12 +11,13 @@ import { productsApi } from '../services/products'
 import { branchesApi } from '../services/branches'
 import type { Branch } from '../types/auth'
 import type { Product } from '../types/product'
-import { EditIcon, CreateIcon, CloseIcon, SearchIcon } from '../utils/iconsUtils'
+import { EditIcon, CreateIcon, CloseIcon, SearchIcon, ViewIcon } from '../utils/iconsUtils'
 import { Dialog, DialogContent } from '../components/ui/dialog'
 import { usePagination, PaginationControl } from '../utils/paginationUtils'
 
 export function InventoryPage() {
   const { user } = useAuth()
+  const { selectedBranch, isAllBranches } = useBranch()
   const [items, setItems] = useState<Inventory[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -78,6 +80,7 @@ export function InventoryPage() {
     setError(null)
     try {
       const f: { branch_id?: number; product_id?: number } = {}
+      if (selectedBranch && selectedBranch.id > 0 && !isAllBranches) f.branch_id = selectedBranch.id
       if (filter.branch_id) f.branch_id = Number(filter.branch_id)
       if (filter.product_id) f.product_id = Number(filter.product_id)
       const res = await inventoryApi.list(f, token)
@@ -99,7 +102,7 @@ export function InventoryPage() {
       setIsLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, token, fetchMissingProducts, fetchMissingBranches])
+  }, [filter, token, fetchMissingProducts, fetchMissingBranches, selectedBranch, isAllBranches])
 
   useEffect(() => {
     let active = true
@@ -221,6 +224,7 @@ export function InventoryPage() {
                       <td className="px-3 py-3 text-sm text-right">
                         <div className="inline-flex items-center gap-2">
                           <button onClick={() => setViewingFor(i)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                            <ViewIcon className="h-3.5 w-3.5" />
                             View
                           </button>
                           {canAdjust ? (

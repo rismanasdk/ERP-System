@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
+import { useBranch } from '../contexts/BranchContext'
 import type { Purchase, CreatePurchaseInput } from '../types/purchase'
 import type { Branch } from '../types/auth'
 import type { Supplier } from '../types/supplier'
@@ -11,12 +12,13 @@ import { CreatePurchaseForm } from '../components/purchasing/CreatePurchaseForm'
 import { ApiError } from '../lib/api'
 import { useConfirm } from '../utils/confirmUtils'
 import { usePagination, PaginationControl } from '../utils/paginationUtils'
-import { CreateIcon, SearchIcon } from '../utils/iconsUtils'
+import { CreateIcon, SearchIcon, ViewIcon, CompleteIcon, CloseIcon } from '../utils/iconsUtils'
 import { Dialog, DialogContent } from '../components/ui/dialog'
 import { formatDate, formatDateTime } from '../utils/dateUtils'
 
 export function PurchasesPage() {
   const { user } = useAuth()
+  const { selectedBranch, isAllBranches } = useBranch()
   const confirmDialog = useConfirm()
   const [items, setItems] = useState<Purchase[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -82,7 +84,9 @@ export function PurchasesPage() {
     setIsLoading(true)
     setError(null)
     try {
-      const payload = filter.branch_id ? { branch_id: Number(filter.branch_id) } : undefined
+      const payload = selectedBranch && selectedBranch.id > 0 && !isAllBranches
+        ? { branch_id: selectedBranch.id }
+        : filter.branch_id ? { branch_id: Number(filter.branch_id) } : undefined
       const res = await purchasesApi.list(payload, token)
       setItems(res)
       resetPage()
@@ -101,7 +105,7 @@ export function PurchasesPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [fetchMissingBranches, fetchMissingSuppliers, filter.branch_id, resetPage, token])
+  }, [fetchMissingBranches, fetchMissingSuppliers, filter.branch_id, resetPage, selectedBranch, isAllBranches, token])
 
   useEffect(() => {
     let active = true
@@ -258,17 +262,28 @@ export function PurchasesPage() {
                     </td>
                     <td className="px-3 py-3 text-sm text-slate-600">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(p.total_amount)}</td>
                     <td className="px-3 py-3 text-sm text-slate-600">{formatDate(p.created_at) ?? '-'}</td>
-                    <td className="px-3 py-3 text-right">
-                      <div className="inline-flex items-center gap-2">
-                        <button onClick={() => setViewingFor(p)} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">View</button>
-                        {p.status === 'DRAFT' && canComplete ? (
-                          <button onClick={() => void onComplete(p.id)} className="rounded-md border border-green-300 bg-white px-2.5 py-1.5 text-xs font-medium text-green-700 hover:bg-green-50 transition-colors">Complete</button>
-                        ) : null}
-                        {p.status !== 'CANCELLED' && canCancel ? (
-                          <button onClick={() => void onCancel(p.id)} className="rounded-md border border-red-300 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 transition-colors">Cancel</button>
-                        ) : null}
-                      </div>
-                    </td>
+                      <td className="px-3 py-3 text-right">
+                        <div className="inline-flex items-center gap-2">
+                          <button onClick={() => setViewingFor(p)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                            <ViewIcon className="h-3.5 w-3.5" />
+                            View
+                          </button>
+                                            
+                          {p.status === 'DRAFT' && canComplete && (
+                            <button onClick={() => void onComplete(p.id)} className="inline-flex items-center gap-1.5 rounded-md border border-green-300 bg-white px-2.5 py-1.5 text-xs font-medium text-green-700 hover:bg-green-50 transition-colors">
+                              <CompleteIcon className="h-3.5 w-3.5" />
+                              Complete
+                            </button>
+                          )}
+                      
+                          {p.status !== 'CANCELLED' && canCancel && (
+                            <button onClick={() => void onCancel(p.id)} className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 transition-colors">
+                              <CloseIcon className="h-3.5 w-3.5" />
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </td>
                   </tr>
                 ))}
               </tbody>
