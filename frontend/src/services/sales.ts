@@ -1,5 +1,5 @@
 import type { ApiEnvelope } from '../types/auth'
-import type { Sale, SaleFilter, CreateSaleInput, SaleFulfillment, FulfillSaleInput } from '../types/sale'
+import type { Sale, SaleFilter, CreateSaleInput, SaleFulfillment, FulfillSaleInput, SalesPayment, PaymentSummary } from '../types/sale'
 import { api } from '../lib/api'
 
 export const salesApi = {
@@ -34,4 +34,7 @@ export const salesApi = {
   confirm: async (id: number, token?: string) => (await api.post<ApiEnvelope<{ id: number; status: string }>>(`/api/v1/sales/${id}/confirm`, undefined, token)).data,
   fulfill: async (id: number, payload: FulfillSaleInput, token?: string) => (await api.post<ApiEnvelope<{ id: number }>>(`/api/v1/sales/${id}/fulfill`, payload, token)).data,
   listFulfillments: async (id: number, token?: string): Promise<SaleFulfillment[]> => (await api.get<ApiEnvelope<SaleFulfillment[]>>(`/api/v1/sales/${id}/fulfillments`, token)).data ?? [],
+  listPayments: async (id: number, token?: string): Promise<SalesPayment[]> => (await api.get<ApiEnvelope<SalesPayment[]>>(`/api/v1/sales/${id}/payments`, token)).data ?? [],
+  paymentSummary: async (id: number, token?: string): Promise<PaymentSummary> => (await api.get<ApiEnvelope<PaymentSummary>>(`/api/v1/sales/${id}/payment-summary`, token)).data,
+  createPayment: async (id: number, payload: { amount: number; payment_method: string; reference_number?: string; notes?: string }, token?: string): Promise<{ id: number }> => (await api.post<ApiEnvelope<{ id: number }>>(`/api/v1/sales/${id}/payments`, payload, token)).data,
 }

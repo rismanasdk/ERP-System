@@ -17,6 +17,9 @@ vi.mock('../services/sales', () => ({
     confirm: vi.fn(),
     fulfill: vi.fn(),
     listFulfillments: vi.fn(),
+    listPayments: vi.fn(),
+    paymentSummary: vi.fn(),
+    createPayment: vi.fn(),
   },
 }))
 
@@ -49,6 +52,10 @@ afterEach(() => {
 
 describe('SalesPage', () => {
   it('renders sale data with branch names', async () => {
+    ;(salesApi.getById as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({})
+    ;(salesApi.listFulfillments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([])
+    ;(salesApi.paymentSummary as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ order_total: 0, paid_amount: 0, remaining_amount: 0, payment_status: 'UNPAID' })
+    ;(salesApi.listPayments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([])
     const listMock = salesApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([
       {
@@ -83,6 +90,10 @@ describe('SalesPage', () => {
 
   it('allows creating a sale', async () => {
     localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['sales.create', 'sales.read'] }))
+    ;(salesApi.getById as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({})
+    ;(salesApi.listFulfillments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([])
+    ;(salesApi.paymentSummary as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ order_total: 0, paid_amount: 0, remaining_amount: 0, payment_status: 'UNPAID' })
+    ;(salesApi.listPayments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([])
 
     let salesRows: Array<{
       id: number
@@ -226,5 +237,35 @@ describe('SalesPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText(/you do not have access to sales/i)).toBeInTheDocument())
+  })
+
+  it('shows payment summary, history, and adds a payment', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['sales.read', 'sales.payment.read', 'sales.payment.create'] }))
+    const sale = { id: 15, branch_id: 2, customer_id: 3, sale_number: 'SALE-015', status: 'CONFIRMED', total_amount: 1000000, created_by: 1, created_at: '2024-01-01T00:00:00Z', items: [] }
+    const listMock = salesApi.list as unknown as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([sale])
+    const detailMock = salesApi.getById as unknown as ReturnType<typeof vi.fn>
+    detailMock.mockResolvedValue(sale)
+    const summaryMock = salesApi.paymentSummary as unknown as ReturnType<typeof vi.fn>
+    summaryMock.mockResolvedValue({ order_total: 1000000, paid_amount: 400000, remaining_amount: 600000, payment_status: 'PARTIALLY_PAID' })
+    const historyMock = salesApi.listPayments as unknown as ReturnType<typeof vi.fn>
+    historyMock.mockResolvedValue([{ id: 1, sales_order_id: 15, amount: 400000, payment_method: 'BANK_TRANSFER', reference_number: 'TRX-001', created_by: 1, created_by_name: 'Risman' }])
+    const createMock = salesApi.createPayment as unknown as ReturnType<typeof vi.fn>
+    createMock.mockResolvedValue({ id: 2 })
+    const branchMock = branchesApi.getById as unknown as ReturnType<typeof vi.fn>
+    branchMock.mockResolvedValue({ id: 2, name: 'Main Branch', code: 'MBR' })
+    const customerMock = customersApi.getById as unknown as ReturnType<typeof vi.fn>
+    customerMock.mockResolvedValue({ id: 3, code: 'C-003', name: 'Customer One', is_active: true })
+    const user = userEvent.setup()
+    render(<MemoryRouter><AuthProvider><ConfirmDialogProvider><SalesPage /></ConfirmDialogProvider></AuthProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('SALE-015')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /view/i }))
+    await waitFor(() => expect(screen.getByText('PARTIALLY_PAID')).toBeInTheDocument())
+    expect(screen.getByText(/payment summary/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/TRX-001/)).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /add payment/i }))
+    await user.type(screen.getByLabelText(/amount/i), '600000')
+    await user.click(screen.getByRole('button', { name: /save payment/i }))
+    await waitFor(() => expect(createMock).toHaveBeenCalledWith(15, { amount: 600000, payment_method: 'CASH', reference_number: undefined, notes: undefined }, undefined))
   })
 })

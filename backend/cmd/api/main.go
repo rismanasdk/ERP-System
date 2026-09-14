@@ -269,6 +269,9 @@ func registerSalesRoutes(router *mux.Router, middleware *auth.Middleware, handle
 	router.Handle("/api/v1/sales/{id}/confirm", middleware.Authenticate(middleware.RequirePermission(sales.SaleConfirmPermission)(http.HandlerFunc(handler.Confirm)))).Methods(http.MethodPost)
 	router.Handle("/api/v1/sales/{id}/fulfill", middleware.Authenticate(middleware.RequirePermission(sales.SaleFulfillPermission)(http.HandlerFunc(handler.Fulfill)))).Methods(http.MethodPost)
 	router.Handle("/api/v1/sales/{id}/fulfillments", middleware.Authenticate(middleware.RequirePermission(sales.SaleReadPermission)(http.HandlerFunc(handler.Fulfillments)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/sales/{id}/payments", middleware.Authenticate(middleware.RequirePermission("sales.payment.read")(http.HandlerFunc(handler.Payments)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/sales/{id}/payments", middleware.Authenticate(middleware.RequirePermission("sales.payment.create")(http.HandlerFunc(handler.CreatePayment)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/sales/{id}/payment-summary", middleware.Authenticate(middleware.RequirePermission("sales.payment.read")(http.HandlerFunc(handler.PaymentSummary)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/sales/{id}/cancel", middleware.Authenticate(middleware.RequirePermission(sales.SaleCancelPermission)(http.HandlerFunc(handler.Cancel)))).Methods(http.MethodPost)
 }
 

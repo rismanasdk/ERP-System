@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"erp-system/backend/internal/audit"
@@ -56,6 +57,10 @@ type repositoryInterface interface {
 	CreateFulfillmentItemWithTx(ctx context.Context, tx *sql.Tx, item *SaleFulfillmentItem) (int64, error)
 	UpdateSaleItemFulfilledWithTx(ctx context.Context, tx *sql.Tx, itemID, fulfilled int64) error
 	ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error)
+	CreatePaymentWithTx(ctx context.Context, tx *sql.Tx, payment *SalesPayment) (int64, error)
+	SumPaymentsWithTx(ctx context.Context, tx *sql.Tx, saleID int64) (float64, error)
+	SumPayments(ctx context.Context, saleID int64) (float64, error)
+	ListPayments(ctx context.Context, saleID int64) ([]SalesPayment, error)
 }
 
 type Service struct {
@@ -101,6 +106,10 @@ var (
 	ErrFulfillmentExceedsRemaining = errors.New("fulfilled quantity exceeds remaining quantity")
 	ErrCustomerNotFound            = errors.New("customer not found")
 	ErrCustomerInactive            = errors.New("customer is inactive")
+	ErrPaymentSaleNotPayable       = errors.New("sales order is not payable in its current status")
+	ErrPaymentOverpayment          = errors.New("payment exceeds remaining amount")
+	ErrInvalidPaymentMethod        = errors.New("invalid payment method")
+	ErrInvalidPaymentAmount        = errors.New("payment amount must be greater than zero")
 )
 
 type ValidationError struct {
@@ -494,6 +503,158 @@ func quantityForSaleItem(id int64, items []FulfillSaleItemInput) int64 {
 		}
 	}
 	return 0
+}
+
+func (s *Service) CreatePayment(ctx context.Context, saleID int64, input CreatePaymentInput) (paymentID int64, err error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return 0, ErrAuthenticationRequired
+	}
+	allowed, err := s.authChecker.HasPermission(ctx, userID, "sales.payment.create")
+	if err != nil {
+		return 0, err
+	}
+	if !allowed {
+		return 0, ErrForbidden
+	}
+	amountCents, ok := moneyCents(input.Amount)
+	if !ok || amountCents <= 0 {
+		return 0, ErrInvalidPaymentAmount
+	}
+	if input.PaymentMethod != "CASH" && input.PaymentMethod != "BANK_TRANSFER" && input.PaymentMethod != "OTHER" && input.PaymentMethod != "QRIS" {
+		return 0, ErrInvalidPaymentMethod
+	}
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	sale, err := s.repo.GetSaleByIDForUpdate(ctx, tx, saleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrSaleNotFound
+		}
+		return 0, err
+	}
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, sale.BranchID, true); err != nil {
+		return 0, err
+	}
+	if sale.Status == SaleStatusDraft || sale.Status == SaleStatusCancelled {
+		return 0, ErrPaymentSaleNotPayable
+	}
+	paid, err := s.repo.SumPaymentsWithTx(ctx, tx, saleID)
+	if err != nil {
+		return 0, err
+	}
+	paidCents, paidOK := moneyCents(paid)
+	totalCents, ok := moneyCents(sale.TotalAmount)
+	if !ok || !paidOK || paidCents+amountCents > totalCents {
+		return 0, ErrPaymentOverpayment
+	}
+	payment := &SalesPayment{SalesOrderID: saleID, Amount: input.Amount, PaymentMethod: input.PaymentMethod, ReferenceNumber: input.ReferenceNumber, Notes: input.Notes, CreatedBy: userID}
+	if input.PaidAt != nil {
+		payment.PaidAt = *input.PaidAt
+	}
+	paymentID, err = s.repo.CreatePaymentWithTx(ctx, tx, payment)
+	if err != nil {
+		return 0, err
+	}
+	if s.auditSvc != nil {
+		resourceID := fmt.Sprintf("%d", paymentID)
+		_, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{ActorUserID: actorUserIDFromContext(ctx), Action: "sale.payment.create", Resource: "sales_payment", ResourceID: &resourceID, Metadata: map[string]any{"sale_id": saleID, "customer_id": sale.CustomerID, "branch_id": sale.BranchID, "amount": input.Amount, "payment_method": input.PaymentMethod}})
+		if err != nil {
+			return 0, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return paymentID, nil
+}
+
+func (s *Service) ListPayments(ctx context.Context, saleID int64) ([]SalesPayment, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return nil, ErrAuthenticationRequired
+	}
+	allowed, err := s.authChecker.HasPermission(ctx, userID, "sales.payment.read")
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrForbidden
+	}
+	sale, err := s.repo.GetSaleByID(ctx, saleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrSaleNotFound
+		}
+		return nil, err
+	}
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, sale.BranchID, true); err != nil {
+		return nil, err
+	}
+	return s.repo.ListPayments(ctx, saleID)
+}
+
+func (s *Service) GetPaymentSummary(ctx context.Context, saleID int64) (*PaymentSummary, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return nil, ErrAuthenticationRequired
+	}
+	allowed, err := s.authChecker.HasPermission(ctx, userID, "sales.payment.read")
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrForbidden
+	}
+	sale, err := s.repo.GetSaleByID(ctx, saleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrSaleNotFound
+		}
+		return nil, err
+	}
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, sale.BranchID, true); err != nil {
+		return nil, err
+	}
+	paid, err := s.repo.SumPayments(ctx, saleID)
+	if err != nil {
+		return nil, err
+	}
+	return buildPaymentSummary(sale.TotalAmount, paid), nil
+}
+
+func buildPaymentSummary(total, paid float64) *PaymentSummary {
+	totalCents, totalOK := moneyCents(total)
+	paidCents, paidOK := moneyCents(paid)
+	if !totalOK || !paidOK {
+		return &PaymentSummary{OrderTotal: total, PaidAmount: paid, RemainingAmount: 0, PaymentStatus: "UNPAID"}
+	}
+	remaining := totalCents - paidCents
+	if remaining < 0 {
+		remaining = 0
+	}
+	status := "UNPAID"
+	if paidCents > 0 && remaining > 0 {
+		status = "PARTIALLY_PAID"
+	}
+	if remaining == 0 && totalCents > 0 {
+		status = "PAID"
+	}
+	return &PaymentSummary{OrderTotal: float64(totalCents) / 100, PaidAmount: float64(paidCents) / 100, RemainingAmount: float64(remaining) / 100, PaymentStatus: status}
+}
+
+func moneyCents(value float64) (int64, bool) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(math.MaxInt64)/100 {
+		return 0, false
+	}
+	return int64(math.Round(value * 100)), true
 }
 
 func (s *Service) ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error) {

@@ -24,6 +24,8 @@ type fakeSaleRepo struct {
 	nextSaleID    int64
 	nextItemID    int64
 	itemsBySaleID map[int64][]SaleItem
+	paidAmount    float64
+	payments      []SalesPayment
 }
 
 func newFakeSaleRepo() *fakeSaleRepo {
@@ -64,6 +66,22 @@ func (r *fakeSaleRepo) UpdateSaleItemFulfilledWithTx(ctx context.Context, tx *sq
 }
 func (r *fakeSaleRepo) ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error) {
 	return nil, nil
+}
+
+func (r *fakeSaleRepo) ListPayments(ctx context.Context, saleID int64) ([]SalesPayment, error) {
+	return r.payments, nil
+}
+
+func (r *fakeSaleRepo) CreatePaymentWithTx(ctx context.Context, tx *sql.Tx, payment *SalesPayment) (int64, error) {
+	payment.ID = int64(len(r.payments) + 1)
+	r.payments = append(r.payments, *payment)
+	return payment.ID, nil
+}
+func (r *fakeSaleRepo) SumPaymentsWithTx(ctx context.Context, tx *sql.Tx, saleID int64) (float64, error) {
+	return r.paidAmount, nil
+}
+func (r *fakeSaleRepo) SumPayments(ctx context.Context, saleID int64) (float64, error) {
+	return r.paidAmount, nil
 }
 
 func (r *fakeSaleRepo) CreateSaleItemWithTx(ctx context.Context, tx *sql.Tx, item *SaleItem) (int64, error) {
@@ -316,6 +334,38 @@ func TestCreateSale_Success(t *testing.T) {
 	}
 	if sale, err := repo.GetSaleByID(ctx, id); err != nil || sale.Status != SaleStatusDraft || sale.TotalAmount != 51.0 {
 		t.Fatalf("unexpected saved sale: %+v err=%v", sale, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCreatePayment_StatusAndOverpayment(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 7)
+	repo := newFakeSaleRepo()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo.db = db
+	repo.sales[1] = &Sale{ID: 1, BranchID: 3, Status: SaleStatusConfirmed, TotalAmount: 1000, CustomerID: 8}
+	service := NewService(repo, newFakeInventoryRepo(), &fakeProductService{products: map[int64]*products.Product{}}, &fakeBranchService{allowedBranches: []branches.Branch{{ID: 3, IsActive: true}}}, &fakeAuthChecker{allowed: true}, &fakeAuditService{})
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+	if id, err := service.CreatePayment(ctx, 1, CreatePaymentInput{Amount: 400, PaymentMethod: "BANK_TRANSFER"}); err != nil || id != 1 {
+		t.Fatalf("expected payment, id=%d err=%v", id, err)
+	}
+	repo.paidAmount = 400
+	summary := buildPaymentSummary(1000, repo.paidAmount)
+	if summary.PaymentStatus != "PARTIALLY_PAID" || summary.RemainingAmount != 600 {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+	repo.paidAmount = 800
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+	if _, err := service.CreatePayment(ctx, 1, CreatePaymentInput{Amount: 300, PaymentMethod: "CASH"}); !errors.Is(err, ErrPaymentOverpayment) {
+		t.Fatalf("expected overpayment, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
