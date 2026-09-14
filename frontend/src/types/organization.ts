@@ -1,0 +1,1 @@
+export type OrgBadgeTone = 'indigo' | 'emerald' | 'slate'

@@ -55,6 +55,16 @@ func (s *fakeSalesService) ListFulfillments(ctx context.Context, saleID int64) (
 	return nil, nil
 }
 
+func (s *fakeSalesService) CreatePayment(ctx context.Context, saleID int64, input CreatePaymentInput) (int64, error) {
+	return 1, nil
+}
+func (s *fakeSalesService) ListPayments(ctx context.Context, saleID int64) ([]SalesPayment, error) {
+	return nil, nil
+}
+func (s *fakeSalesService) GetPaymentSummary(ctx context.Context, saleID int64) (*PaymentSummary, error) {
+	return &PaymentSummary{}, nil
+}
+
 func TestSaleHandler_Create_InvalidBody(t *testing.T) {
 	service := &fakeSalesService{}
 	handler := NewHandler(service)

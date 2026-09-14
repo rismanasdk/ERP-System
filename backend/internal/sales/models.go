@@ -3,16 +3,47 @@ package sales
 import "time"
 
 type Sale struct {
-	ID          int64     `json:"id"`
-	BranchID    int64     `json:"branch_id"`
-	CustomerID  int64     `json:"customer_id"`
-	SaleNumber  string    `json:"sale_number"`
-	Status      string    `json:"status"`
-	TotalAmount float64   `json:"total_amount"`
-	Notes       *string   `json:"notes,omitempty"`
-	CreatedBy   int64     `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	ID              int64     `json:"id"`
+	BranchID        int64     `json:"branch_id"`
+	CustomerID      int64     `json:"customer_id"`
+	SaleNumber      string    `json:"sale_number"`
+	Status          string    `json:"status"`
+	TotalAmount     float64   `json:"total_amount"`
+	Notes           *string   `json:"notes,omitempty"`
+	CreatedBy       int64     `json:"created_by"`
+	CreatedAt       time.Time `json:"created_at,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+	PaymentStatus   string    `json:"payment_status,omitempty"`
+	PaidAmount      float64   `json:"paid_amount,omitempty"`
+	RemainingAmount float64   `json:"remaining_amount,omitempty"`
+}
+
+type SalesPayment struct {
+	ID              int64     `json:"id"`
+	SalesOrderID    int64     `json:"sales_order_id"`
+	Amount          float64   `json:"amount"`
+	PaymentMethod   string    `json:"payment_method"`
+	ReferenceNumber *string   `json:"reference_number,omitempty"`
+	PaidAt          time.Time `json:"paid_at"`
+	Notes           *string   `json:"notes,omitempty"`
+	CreatedBy       int64     `json:"created_by"`
+	CreatedByName   string    `json:"created_by_name,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type PaymentSummary struct {
+	OrderTotal      float64 `json:"order_total"`
+	PaidAmount      float64 `json:"paid_amount"`
+	RemainingAmount float64 `json:"remaining_amount"`
+	PaymentStatus   string  `json:"payment_status"`
+}
+
+type CreatePaymentInput struct {
+	Amount          float64    `json:"amount"`
+	PaymentMethod   string     `json:"payment_method"`
+	ReferenceNumber *string    `json:"reference_number,omitempty"`
+	PaidAt          *time.Time `json:"paid_at,omitempty"`
+	Notes           *string    `json:"notes,omitempty"`
 }
 
 type SaleFilter struct {

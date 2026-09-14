@@ -44,6 +44,8 @@ export type CreateSaleInput = {
 }
 
 export type FulfillSaleInput = { notes?: string; items: { sales_order_item_id: number; quantity_fulfilled: number }[] }
+export type SalesPayment = { id: number; sales_order_id: number; amount: number; payment_method: 'CASH' | 'BANK_TRANSFER' | 'OTHER' | 'QRIS' | string; reference_number?: string | null; paid_at?: string; notes?: string | null; created_by: number; created_by_name?: string; created_at?: string }
+export type PaymentSummary = { order_total: number; paid_amount: number; remaining_amount: number; payment_status: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | string }
 
 export type SaleWithItems = Sale & {
   items?: SaleItem[]

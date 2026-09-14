@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type SaleRepository interface {
@@ -398,4 +399,47 @@ func (r *Repository) ListFulfillments(ctx context.Context, saleID int64) ([]Sale
 		result = append(result, *f)
 	}
 	return result, rows.Err()
+}
+
+func (r *Repository) CreatePaymentWithTx(ctx context.Context, tx *sql.Tx, payment *SalesPayment) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx, `INSERT INTO sales_payments (sales_order_id, amount, payment_method, reference_number, paid_at, notes, created_by) VALUES ($1, $2, $3, $4, COALESCE($5, NOW()), $6, $7) RETURNING id, paid_at, created_at`, payment.SalesOrderID, payment.Amount, payment.PaymentMethod, payment.ReferenceNumber, nullableTime(payment.PaidAt), payment.Notes, payment.CreatedBy).Scan(&id, &payment.PaidAt, &payment.CreatedAt)
+	payment.ID = id
+	return id, err
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value
+}
+
+func (r *Repository) SumPaymentsWithTx(ctx context.Context, tx *sql.Tx, saleID int64) (float64, error) {
+	var total sql.NullFloat64
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount), 0) FROM sales_payments WHERE sales_order_id = $1`, saleID).Scan(&total)
+	return total.Float64, err
+}
+
+func (r *Repository) SumPayments(ctx context.Context, saleID int64) (float64, error) {
+	var total sql.NullFloat64
+	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount), 0) FROM sales_payments WHERE sales_order_id = $1`, saleID).Scan(&total)
+	return total.Float64, err
+}
+
+func (r *Repository) ListPayments(ctx context.Context, saleID int64) ([]SalesPayment, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT sp.id, sp.sales_order_id, sp.amount, sp.payment_method, sp.reference_number, sp.paid_at, sp.notes, sp.created_by, COALESCE(u.name, ''), sp.created_at FROM sales_payments sp LEFT JOIN users u ON u.id = sp.created_by WHERE sp.sales_order_id = $1 ORDER BY sp.paid_at ASC, sp.id ASC`, saleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	payments := []SalesPayment{}
+	for rows.Next() {
+		var payment SalesPayment
+		if err := rows.Scan(&payment.ID, &payment.SalesOrderID, &payment.Amount, &payment.PaymentMethod, &payment.ReferenceNumber, &payment.PaidAt, &payment.Notes, &payment.CreatedBy, &payment.CreatedByName, &payment.CreatedAt); err != nil {
+			return nil, err
+		}
+		payments = append(payments, payment)
+	}
+	return payments, rows.Err()
 }

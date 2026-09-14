@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useBranch } from '../contexts/BranchContext'
-import type { Sale, CreateSaleInput, SaleFulfillment } from '../types/sale'
+import type { Sale, CreateSaleInput, SaleFulfillment, SalesPayment, PaymentSummary } from '../types/sale'
 import type { Branch } from '../types/auth'
 import { salesApi } from '../services/sales'
 import { inventoryApi } from '../services/inventory'
@@ -37,6 +37,11 @@ export function SalesPage() {
   const [fulfillQuantities, setFulfillQuantities] = useState<Record<number, string>>({})
   const [fulfillError, setFulfillError] = useState<string | null>(null)
   const [currentStock, setCurrentStock] = useState<Record<number, number>>({})
+  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null)
+  const [payments, setPayments] = useState<SalesPayment[]>([])
+  const [paymentOpen, setPaymentOpen] = useState(false)
+  const [paymentForm, setPaymentForm] = useState({ amount: '', payment_method: 'CASH', reference_number: '', notes: '' })
+  const [paymentError, setPaymentError] = useState<string | null>(null)
 
   const token = readStoredAccessToken() ?? undefined
   const rows = useMemo(() => items ?? [], [items])
@@ -167,10 +172,20 @@ export function SalesPage() {
   }, [confirmDialog, load, rows, token])
 
   const onView = useCallback(async (row: Sale) => {
-    const [detail, history] = await Promise.all([salesApi.getById(row.id, token), salesApi.listFulfillments(row.id, token)])
+    const [detail, history, summary, paymentHistory] = await Promise.all([salesApi.getById(row.id, token), salesApi.listFulfillments(row.id, token), salesApi.paymentSummary(row.id, token), salesApi.listPayments(row.id, token)])
     setViewingFor(detail)
-    setFulfillments(history)
+    setFulfillments(Array.isArray(history) ? history : [])
+    setPaymentSummary(summary)
+    setPayments(Array.isArray(paymentHistory) ? paymentHistory : [])
   }, [token])
+
+  const onPayment = useCallback(async () => {
+    if (!viewingFor || !paymentSummary) return
+    const amount = Number(paymentForm.amount)
+    if (!Number.isFinite(amount) || amount <= 0 || amount > paymentSummary.remaining_amount) { setPaymentError('Enter an amount within the remaining balance.'); return }
+    setSubmitting(true); setPaymentError(null)
+    try { await salesApi.createPayment(viewingFor.id, { amount, payment_method: paymentForm.payment_method, reference_number: paymentForm.reference_number || undefined, notes: paymentForm.notes || undefined }, token); setPaymentOpen(false); setPaymentForm({ amount: '', payment_method: 'CASH', reference_number: '', notes: '' }); const [summary, history] = await Promise.all([salesApi.paymentSummary(viewingFor.id, token), salesApi.listPayments(viewingFor.id, token)]); setPaymentSummary(summary); setPayments(history) } catch (err) { setPaymentError(err instanceof ApiError ? err.message : 'Unable to create payment.') } finally { setSubmitting(false) }
+  }, [paymentForm, paymentSummary, token, viewingFor])
 
   const onConfirm = useCallback(async (id: number) => { setSubmitting(true); try { await salesApi.confirm(id, token); await load() } catch (err) { setError(err instanceof ApiError ? err.message : 'Unable to confirm sale.') } finally { setSubmitting(false) } }, [load, token])
 
@@ -209,6 +224,8 @@ export function SalesPage() {
   const canConfirm = user?.permissions?.includes('sales.confirm')
   const canFulfill = user?.permissions?.includes('sales.fulfill')
   const canCancel = user?.permissions?.includes('sales.cancel')
+  const canPaymentRead = user?.permissions?.includes('sales.payment.read')
+  const canPaymentCreate = user?.permissions?.includes('sales.payment.create')
 
   return (
     <div className="space-y-6">
@@ -362,11 +379,13 @@ export function SalesPage() {
               {viewingFor.status === 'DRAFT' && canConfirm ? <button onClick={() => void onConfirm(viewingFor.id)} className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white">Confirm Order</button> : null}
               {(viewingFor.status === 'CONFIRMED' || viewingFor.status === 'PARTIALLY_FULFILLED') && canFulfill ? <button onClick={() => void openFulfill(viewingFor)} className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white">Fulfill Order</button> : null}
               {fulfillments.length > 0 ? <div><div className="text-sm text-slate-500">Fulfillment History</div>{fulfillments.map((fulfillment) => <div key={fulfillment.id} className="mt-1 text-sm">Fulfillment #{fulfillment.id}: {fulfillment.items.reduce((sum, item) => sum + item.quantity_fulfilled, 0)} units, {fulfillment.fulfilled_by_name || 'Unknown User'}</div>)}</div> : null}
+              {canPaymentRead && paymentSummary ? <div className="border-t border-slate-200 pt-4"><div className="mb-2 text-sm font-semibold text-slate-700">Payment Summary</div><div className="grid grid-cols-2 gap-2 text-sm"><span>Total</span><span className="text-right">{currency(paymentSummary.order_total)}</span><span>Paid</span><span className="text-right">{currency(paymentSummary.paid_amount)}</span><span>Remaining</span><span className="text-right">{currency(paymentSummary.remaining_amount)}</span><span>Status</span><span className="text-right font-medium">{paymentSummary.payment_status}</span></div>{canPaymentCreate && paymentSummary.remaining_amount > 0 && viewingFor.status !== 'DRAFT' && viewingFor.status !== 'CANCELLED' ? <button onClick={() => { setPaymentOpen(true); setPaymentError(null) }} className="mt-3 rounded-md bg-indigo-600 px-3 py-2 text-sm text-white">Add Payment</button> : null}<div className="mt-3"><div className="text-sm text-slate-500">Payment History</div>{payments.map((payment) => <div key={payment.id} className="mt-1 flex justify-between text-sm"><span>{payment.paid_at ? formatDate(payment.paid_at) : '-'} · {payment.payment_method} · {payment.reference_number || '-'}</span><span>{currency(payment.amount)} · {payment.created_by_name || 'Unknown User'}</span></div>)}</div></div> : null}
             </div>
           </DialogContent>
         </Dialog>
       )}
       {fulfilling && viewingFor ? <Dialog open={fulfilling} onOpenChange={setFulfilling}><DialogContent><h3 className="text-lg font-semibold text-slate-900">Fulfill Order</h3><div className="mt-4 space-y-3">{(viewingFor.items ?? []).map((item) => <label key={item.id} className="block text-sm text-slate-700">Product {item.product_id} (remaining {item.quantity - item.fulfilled_quantity}, current stock {currentStock[item.product_id] ?? 0})<input type="number" min="0" max={item.quantity - item.fulfilled_quantity} value={fulfillQuantities[item.id] ?? ''} onChange={(e) => setFulfillQuantities((current) => ({ ...current, [item.id]: e.target.value }))} className="mt-1 block w-full rounded-md border-slate-200" /></label>)}{fulfillError ? <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{fulfillError}</div> : null}<div className="flex justify-end gap-2"><button onClick={() => setFulfilling(false)} className="rounded-md border border-slate-200 px-3 py-2 text-sm">Cancel</button><button onClick={() => void onFulfill()} disabled={submitting} className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white">Fulfill Order</button></div></div></DialogContent></Dialog> : null}
+      {paymentOpen && viewingFor && paymentSummary ? <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}><DialogContent><h3 className="text-lg font-semibold text-slate-900">Add Payment</h3><div className="mt-4 space-y-3"><div className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Remaining: <span className="font-semibold text-slate-900">{currency(paymentSummary.remaining_amount)}</span></div><label className="block text-sm text-slate-700">Amount<input type="number" min="0.01" max={paymentSummary.remaining_amount} value={paymentForm.amount} onChange={(e) => setPaymentForm((form) => ({ ...form, amount: e.target.value }))} className="mt-1 block w-full rounded-md border-slate-200" /></label><label className="block text-sm text-slate-700">Payment Method<select value={paymentForm.payment_method} onChange={(e) => setPaymentForm((form) => ({ ...form, payment_method: e.target.value }))} className="mt-1 block w-full rounded-md border-slate-200"><option value="CASH">CASH</option><option value="BANK_TRANSFER">BANK_TRANSFER</option><option value="OTHER">OTHER</option><option value="QRIS">QRIS</option></select></label><label className="block text-sm text-slate-700">Reference Number<input value={paymentForm.reference_number} onChange={(e) => setPaymentForm((form) => ({ ...form, reference_number: e.target.value }))} className="mt-1 block w-full rounded-md border-slate-200" /></label><label className="block text-sm text-slate-700">Notes<textarea value={paymentForm.notes} onChange={(e) => setPaymentForm((form) => ({ ...form, notes: e.target.value }))} className="mt-1 block w-full rounded-md border-slate-200" rows={2} /></label>{paymentError ? <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{paymentError}</div> : null}<div className="flex justify-end gap-2"><button onClick={() => setPaymentOpen(false)} className="rounded-md border border-slate-200 px-3 py-2 text-sm">Cancel</button><button onClick={() => void onPayment()} disabled={submitting} className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white">Save Payment</button></div></div></DialogContent></Dialog> : null}
     </div>
   )
 }

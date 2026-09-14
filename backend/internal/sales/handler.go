@@ -26,6 +26,56 @@ type SaleService interface {
 	ConfirmSale(ctx context.Context, saleID int64) error
 	FulfillSale(ctx context.Context, saleID int64, input FulfillSaleInput) (int64, error)
 	ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error)
+	CreatePayment(ctx context.Context, saleID int64, input CreatePaymentInput) (int64, error)
+	ListPayments(ctx context.Context, saleID int64) ([]SalesPayment, error)
+	GetPaymentSummary(ctx context.Context, saleID int64) (*PaymentSummary, error)
+}
+
+func (h *Handler) Payments(w http.ResponseWriter, r *http.Request) {
+	id, err := parseSaleID(r)
+	if err != nil {
+		h.handleServiceError(w, err, "invalid sale id")
+		return
+	}
+	payments, err := h.service.ListPayments(r.Context(), id)
+	if err != nil {
+		h.handleServiceError(w, err, "failed to list payments")
+		return
+	}
+	response.JSONOK(w, payments)
+}
+
+func (h *Handler) PaymentSummary(w http.ResponseWriter, r *http.Request) {
+	id, err := parseSaleID(r)
+	if err != nil {
+		h.handleServiceError(w, err, "invalid sale id")
+		return
+	}
+	summary, err := h.service.GetPaymentSummary(r.Context(), id)
+	if err != nil {
+		h.handleServiceError(w, err, "failed to fetch payment summary")
+		return
+	}
+	response.JSONOK(w, summary)
+}
+
+func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
+	id, err := parseSaleID(r)
+	if err != nil {
+		h.handleServiceError(w, err, "invalid sale id")
+		return
+	}
+	var input CreatePaymentInput
+	if err = json.NewDecoder(r.Body).Decode(&input); err != nil {
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid request body"))
+		return
+	}
+	paymentID, err := h.service.CreatePayment(r.Context(), id, input)
+	if err != nil {
+		h.handleServiceError(w, err, "failed to create payment")
+		return
+	}
+	response.JSON(w, http.StatusCreated, map[string]int64{"id": paymentID})
 }
 
 func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +268,8 @@ func (h *Handler) handleServiceError(w http.ResponseWriter, err error, message s
 	case errors.Is(err, ErrSaleAlreadyCompleted), errors.Is(err, ErrSaleAlreadyCancelled), errors.Is(err, ErrSaleHasNoItems), errors.Is(err, ErrInsufficientStock), errors.Is(err, ErrInvalidSaleTransition):
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	case errors.Is(err, ErrSaleNotConfirmed), errors.Is(err, ErrFulfillmentExceedsRemaining):
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
+	case errors.Is(err, ErrPaymentSaleNotPayable), errors.Is(err, ErrPaymentOverpayment), errors.Is(err, ErrInvalidPaymentMethod), errors.Is(err, ErrInvalidPaymentAmount):
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	default:
 		var validationErr *ValidationError
