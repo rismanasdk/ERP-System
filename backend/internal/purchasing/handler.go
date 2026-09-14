@@ -23,6 +23,55 @@ type PurchasingService interface {
 	GetPurchase(ctx context.Context, id int64) (*Purchase, error)
 	CompletePurchase(ctx context.Context, purchaseID int64) error
 	CancelPurchase(ctx context.Context, purchaseID int64) error
+	OrderPurchase(ctx context.Context, purchaseID int64) error
+	ReceivePurchase(ctx context.Context, purchaseID int64, input ReceivePurchaseInput) (int64, error)
+	ListReceipts(ctx context.Context, purchaseID int64) ([]PurchaseReceipt, error)
+}
+
+func (h *Handler) Order(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePurchaseID(r)
+	if err != nil {
+		h.handleServiceError(w, err, "invalid purchase id")
+		return
+	}
+	if err = h.service.OrderPurchase(r.Context(), id); err != nil {
+		h.handleServiceError(w, err, "failed to order purchase")
+		return
+	}
+	response.JSONOK(w, map[string]any{"id": id, "status": "ORDERED"})
+}
+
+func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePurchaseID(r)
+	if err != nil {
+		h.handleServiceError(w, err, "invalid purchase id")
+		return
+	}
+	var input ReceivePurchaseInput
+	if err = json.NewDecoder(r.Body).Decode(&input); err != nil {
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid request body"))
+		return
+	}
+	receiptID, err := h.service.ReceivePurchase(r.Context(), id, input)
+	if err != nil {
+		h.handleServiceError(w, err, "failed to receive purchase")
+		return
+	}
+	response.JSONOK(w, map[string]int64{"id": receiptID})
+}
+
+func (h *Handler) Receipts(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePurchaseID(r)
+	if err != nil {
+		h.handleServiceError(w, err, "invalid purchase id")
+		return
+	}
+	items, err := h.service.ListReceipts(r.Context(), id)
+	if err != nil {
+		h.handleServiceError(w, err, "failed to list receipts")
+		return
+	}
+	response.JSONOK(w, items)
 }
 
 func NewHandler(service PurchasingService) *Handler {
@@ -171,6 +220,8 @@ func (h *Handler) handleServiceError(w http.ResponseWriter, err error, message s
 	case errors.Is(err, branches.ErrBranchInactive):
 		response.JSONError(w, http.StatusForbidden, response.NewAPIError(http.StatusForbidden, "FORBIDDEN", "branch is inactive"))
 	case errors.Is(err, ErrPurchaseAlreadyCompleted), errors.Is(err, ErrCannotCompleteCancelled), errors.Is(err, ErrPurchaseAlreadyCancelled), errors.Is(err, ErrPurchaseHasNoItems), errors.Is(err, ErrInsufficientStock), errors.Is(err, ErrInvalidPurchaseTransition):
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
+	case errors.Is(err, ErrReceiptExceedsRemaining), errors.Is(err, ErrPurchaseNotOrdered):
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	default:
 		var validationErr *ValidationError

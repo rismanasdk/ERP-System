@@ -121,6 +121,44 @@ func TestRepository_ListFilters(t *testing.T) {
 	}
 }
 
+func TestRepository_ListMovementsFilters(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewRepository(db)
+	branchID := int64(10)
+	productID := int64(20)
+	now := time.Now().Truncate(time.Second)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT sm.id, sm.product_id, sm.branch_id, sm.movement_type, sm.quantity_delta, sm.reference_type, sm.reference_id, sm.actor_user_id, u.name, sm.metadata, sm.created_at
+		FROM stock_movements sm
+		LEFT JOIN users u ON u.id = sm.actor_user_id
+		WHERE sm.branch_id = $1 AND sm.product_id = $2 ORDER BY created_at DESC, id DESC`)).
+		WithArgs(branchID, productID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "product_id", "branch_id", "movement_type", "quantity_delta", "reference_type", "reference_id", "actor_user_id", "name", "metadata", "created_at"}).AddRow(
+			int64(7), productID, branchID, "IN", int64(5), "purchase", int64(88), int64(12), "Risman Hadinata", `{"reason":"restock"}`, now,
+		))
+
+	items, err := repo.ListMovements(context.Background(), &branchID, &productID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(items) != 1 || items[0].BranchID != branchID || items[0].ProductID != productID || items[0].MovementType != "IN" {
+		t.Fatalf("unexpected movement list: %+v", items)
+	}
+	if items[0].ActorUserName == nil || *items[0].ActorUserName != "Risman Hadinata" {
+		t.Fatalf("unexpected actor user name: %+v", items[0].ActorUserName)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestRepository_CreateWithTx(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

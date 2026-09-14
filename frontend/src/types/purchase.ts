@@ -9,6 +9,25 @@ export type Purchase = {
   created_by: number
   created_at?: string
   updated_at?: string
+  items?: PurchaseItem[]
+}
+
+export type PurchaseReceipt = {
+  id: number
+  purchase_order_id: number
+  branch_id: number
+  received_by: number
+  received_by_name?: string
+  received_at?: string
+  notes?: string | null
+  items: PurchaseReceiptItem[]
+}
+
+export type PurchaseReceiptItem = {
+  id: number
+  purchase_order_item_id: number
+  product_id: number
+  quantity_received: number
 }
 
 export type PurchaseFilter = {
@@ -24,6 +43,7 @@ export type PurchaseItem = {
   quantity: number
   unit_cost: number
   subtotal: number
+  received_quantity: number
   created_at?: string
   updated_at?: string
 }

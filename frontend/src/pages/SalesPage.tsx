@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useBranch } from '../contexts/BranchContext'
-import type { Sale, CreateSaleInput } from '../types/sale'
+import type { Sale, CreateSaleInput, SaleFulfillment } from '../types/sale'
 import type { Branch } from '../types/auth'
 import { salesApi } from '../services/sales'
+import { inventoryApi } from '../services/inventory'
 import { branchesApi } from '../services/branches'
 import { readStoredAccessToken } from '../services/authSession'
 import { CreateSaleForm } from '../components/sales/CreateSaleForm'
@@ -12,6 +13,8 @@ import { useConfirm } from '../utils/confirmUtils'
 import { Dialog, DialogContent } from '../components/ui/dialog'
 import { formatDate, formatDateTime } from '../utils/dateUtils'
 import {  ViewIcon, CloseIcon, CompleteIcon } from '../utils/iconsUtils'
+import { customersApi } from '../services/customers'
+import type { Customer } from '../types/customer'
 
 const currency = (n: number) =>
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
@@ -28,6 +31,12 @@ export function SalesPage() {
   const [viewingFor, setViewingFor] = useState<Sale | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [branchMap, setBranchMap] = useState<Record<number, Branch | null>>({})
+  const [customerMap, setCustomerMap] = useState<Record<number, Customer | null>>({})
+  const [fulfillments, setFulfillments] = useState<SaleFulfillment[]>([])
+  const [fulfilling, setFulfilling] = useState(false)
+  const [fulfillQuantities, setFulfillQuantities] = useState<Record<number, string>>({})
+  const [fulfillError, setFulfillError] = useState<string | null>(null)
+  const [currentStock, setCurrentStock] = useState<Record<number, number>>({})
 
   const token = readStoredAccessToken() ?? undefined
   const rows = useMemo(() => items ?? [], [items])
@@ -66,6 +75,8 @@ export function SalesPage() {
       const data = (list ?? []) as Sale[]
       setItems(data)
       await fetchMissingBranches([...new Set(data.map((d) => d.branch_id))])
+      const customerEntries = await Promise.all([...new Set(data.map((d) => d.customer_id).filter(Boolean))].map(async (id) => { try { return [id, await customersApi.getById(id, token)] as const } catch { return [id, null] as const } }))
+      setCustomerMap((current) => ({ ...current, ...Object.fromEntries(customerEntries) }))
     } catch (err) {
       const e = err as ApiError
       if (e.status === 403) {
@@ -156,8 +167,30 @@ export function SalesPage() {
   }, [confirmDialog, load, rows, token])
 
   const onView = useCallback(async (row: Sale) => {
-    setViewingFor(row)
-  }, [])
+    const [detail, history] = await Promise.all([salesApi.getById(row.id, token), salesApi.listFulfillments(row.id, token)])
+    setViewingFor(detail)
+    setFulfillments(history)
+  }, [token])
+
+  const onConfirm = useCallback(async (id: number) => { setSubmitting(true); try { await salesApi.confirm(id, token); await load() } catch (err) { setError(err instanceof ApiError ? err.message : 'Unable to confirm sale.') } finally { setSubmitting(false) } }, [load, token])
+
+  const onFulfill = useCallback(async () => {
+    if (!viewingFor?.items) return
+    const payload = viewingFor.items.map((item) => ({ sales_order_item_id: item.id, quantity_fulfilled: Number(fulfillQuantities[item.id] || 0) })).filter((item) => item.quantity_fulfilled > 0)
+    const invalid = !payload.length || payload.some((item) => { const original = viewingFor.items?.find((candidate) => candidate.id === item.sales_order_item_id); return !original || item.quantity_fulfilled > original.quantity - original.fulfilled_quantity })
+    if (invalid) { setFulfillError('Enter a valid quantity within the remaining amount.'); return }
+    setSubmitting(true); setFulfillError(null)
+    try { await salesApi.fulfill(viewingFor.id, { items: payload }, token); setFulfilling(false); await load(); const [detail, history] = await Promise.all([salesApi.getById(viewingFor.id, token), salesApi.listFulfillments(viewingFor.id, token)]); setViewingFor(detail); setFulfillments(history) } catch (err) { setFulfillError(err instanceof ApiError ? err.message : 'Unable to fulfill sale.') } finally { setSubmitting(false) }
+  }, [fulfillQuantities, load, token, viewingFor])
+
+  const openFulfill = useCallback(async (sale: Sale) => {
+    await onView(sale)
+    setFulfilling(true)
+    try {
+      const stock = await inventoryApi.list({ branch_id: sale.branch_id })
+      setCurrentStock(Object.fromEntries(stock.map((item) => [item.product_id, item.quantity])))
+    } catch { setCurrentStock({}) }
+  }, [onView])
 
   useEffect(() => {
     let active = true
@@ -173,6 +206,8 @@ export function SalesPage() {
 
   const canCreate = user?.permissions?.includes('sales.create')
   const canComplete = user?.permissions?.includes('sales.complete')
+  const canConfirm = user?.permissions?.includes('sales.confirm')
+  const canFulfill = user?.permissions?.includes('sales.fulfill')
   const canCancel = user?.permissions?.includes('sales.cancel')
 
   return (
@@ -225,6 +260,7 @@ export function SalesPage() {
               <thead>
                 <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wider text-slate-500">
                   <th className="px-3 py-3">Number</th>
+                  <th className="px-3 py-3">Customer</th>
                   <th className="px-3 py-3">Branch</th>
                   <th className="px-3 py-3">Status</th>
                   <th className="px-3 py-3">Total</th>
@@ -236,6 +272,7 @@ export function SalesPage() {
                 {rows.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-3 py-3 text-sm font-medium text-slate-900">{p.sale_number}</td>
+                    <td className="px-3 py-3 text-sm text-slate-700">{customerMap[p.customer_id]?.name ?? `#${p.customer_id}`}</td>
                     <td className="px-3 py-3 text-sm text-slate-700">{branchMap[p.branch_id]?.name ?? `#${p.branch_id}`}</td>
                     <td className="px-3 py-3 text-sm">
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -262,6 +299,8 @@ export function SalesPage() {
         Complete
       </button>
     ) : null}
+    {p.status === 'DRAFT' && canConfirm ? <button onClick={() => void onConfirm(p.id)} className="rounded-md border border-indigo-300 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-700">Confirm</button> : null}
+    {(p.status === 'CONFIRMED' || p.status === 'PARTIALLY_FULFILLED') && canFulfill ? <button onClick={() => { void openFulfill(p); setFulfillError(null) }} className="rounded-md border border-indigo-300 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-700">Fulfill</button> : null}
     {p.status !== 'CANCELLED' && canCancel ? (
       <button onClick={() => void onCancel(p.id)} className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 transition-colors">
         <CloseIcon className="h-3.5 w-3.5" />
@@ -299,6 +338,10 @@ export function SalesPage() {
                 <div className="text-sm font-medium">{viewingFor.sale_number}</div>
               </div>
               <div>
+                <div className="text-sm text-slate-500">Customer</div>
+                <div className="text-sm font-medium">{customerMap[viewingFor.customer_id]?.name ?? `#${viewingFor.customer_id}`}</div>
+              </div>
+              <div>
                 <div className="text-sm text-slate-500">Branch</div>
                 <div className="text-sm font-medium">{branchMap[viewingFor.branch_id]?.name ?? `#${viewingFor.branch_id}`}</div>
               </div>
@@ -315,11 +358,15 @@ export function SalesPage() {
                 <div className="text-sm font-medium">{formatDateTime(viewingFor.created_at)}</div>
               </div>
 
-              {/* NEW: daftar produk */}
+              <div><div className="text-sm text-slate-500">Items</div><table className="mt-2 min-w-full text-left text-xs"><thead><tr><th className="px-2 py-2">Product</th><th className="px-2 py-2">Ordered</th><th className="px-2 py-2">Fulfilled</th><th className="px-2 py-2">Remaining</th></tr></thead><tbody>{(viewingFor.items ?? []).map((item) => <tr key={item.id} className="border-t border-slate-100"><td className="px-2 py-2">{item.product_id}</td><td className="px-2 py-2">{item.quantity}</td><td className="px-2 py-2">{item.fulfilled_quantity}</td><td className="px-2 py-2">{item.quantity - item.fulfilled_quantity}</td></tr>)}</tbody></table></div>
+              {viewingFor.status === 'DRAFT' && canConfirm ? <button onClick={() => void onConfirm(viewingFor.id)} className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white">Confirm Order</button> : null}
+              {(viewingFor.status === 'CONFIRMED' || viewingFor.status === 'PARTIALLY_FULFILLED') && canFulfill ? <button onClick={() => void openFulfill(viewingFor)} className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white">Fulfill Order</button> : null}
+              {fulfillments.length > 0 ? <div><div className="text-sm text-slate-500">Fulfillment History</div>{fulfillments.map((fulfillment) => <div key={fulfillment.id} className="mt-1 text-sm">Fulfillment #{fulfillment.id}: {fulfillment.items.reduce((sum, item) => sum + item.quantity_fulfilled, 0)} units, {fulfillment.fulfilled_by_name || 'Unknown User'}</div>)}</div> : null}
             </div>
           </DialogContent>
         </Dialog>
       )}
+      {fulfilling && viewingFor ? <Dialog open={fulfilling} onOpenChange={setFulfilling}><DialogContent><h3 className="text-lg font-semibold text-slate-900">Fulfill Order</h3><div className="mt-4 space-y-3">{(viewingFor.items ?? []).map((item) => <label key={item.id} className="block text-sm text-slate-700">Product {item.product_id} (remaining {item.quantity - item.fulfilled_quantity}, current stock {currentStock[item.product_id] ?? 0})<input type="number" min="0" max={item.quantity - item.fulfilled_quantity} value={fulfillQuantities[item.id] ?? ''} onChange={(e) => setFulfillQuantities((current) => ({ ...current, [item.id]: e.target.value }))} className="mt-1 block w-full rounded-md border-slate-200" /></label>)}{fulfillError ? <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{fulfillError}</div> : null}<div className="flex justify-end gap-2"><button onClick={() => setFulfilling(false)} className="rounded-md border border-slate-200 px-3 py-2 text-sm">Cancel</button><button onClick={() => void onFulfill()} disabled={submitting} className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white">Fulfill Order</button></div></div></DialogContent></Dialog> : null}
     </div>
   )
 }

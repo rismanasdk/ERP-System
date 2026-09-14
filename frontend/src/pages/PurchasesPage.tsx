@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useBranch } from '../contexts/BranchContext'
-import type { Purchase, CreatePurchaseInput } from '../types/purchase'
+import type { Purchase, CreatePurchaseInput, PurchaseReceipt } from '../types/purchase'
 import type { Branch } from '../types/auth'
 import type { Supplier } from '../types/supplier'
 import { purchasesApi } from '../services/purchases'
@@ -29,6 +29,10 @@ export function PurchasesPage() {
   const [submitting, setSubmitting] = useState(false)
   const [branchMap, setBranchMap] = useState<Record<number, Branch | null>>({})
   const [supplierMap, setSupplierMap] = useState<Record<number, Supplier | null>>({})
+  const [receipts, setReceipts] = useState<PurchaseReceipt[]>([])
+  const [receiving, setReceiving] = useState(false)
+  const [receiveQuantities, setReceiveQuantities] = useState<Record<number, string>>({})
+  const [receiveError, setReceiveError] = useState<string | null>(null)
 
   const token = readStoredAccessToken() ?? undefined
   const rows = useMemo(() => items ?? [], [items])
@@ -180,7 +184,28 @@ export function PurchasesPage() {
 
   const canCreate = user?.permissions?.includes('purchases.create')
   const canComplete = user?.permissions?.includes('purchases.complete')
+  const canReceive = user?.permissions?.includes('purchases.receive')
   const canCancel = user?.permissions?.includes('purchases.cancel')
+
+  const refreshDetail = useCallback(async (purchase: Purchase) => {
+    const [detail, receiptList] = await Promise.all([purchasesApi.getById(purchase.id, token), purchasesApi.listReceipts(purchase.id, token)])
+    setViewingFor(detail)
+    setReceipts(receiptList)
+  }, [token])
+
+  const onOrder = useCallback(async (id: number) => {
+    setSubmitting(true)
+    try { await purchasesApi.order(id, token); await load() } catch (err) { setError(err instanceof ApiError ? err.message : 'Unable to order purchase.') } finally { setSubmitting(false) }
+  }, [load, token])
+
+  const onReceive = useCallback(async () => {
+    if (!viewingFor?.items) return
+    const items = viewingFor.items.map((item) => ({ purchase_order_item_id: item.id, quantity_received: Number(receiveQuantities[item.id] || 0) })).filter((item) => item.quantity_received > 0)
+    const invalid = items.some((item) => { const original = viewingFor.items?.find((candidate) => candidate.id === item.purchase_order_item_id); return !original || item.quantity_received > original.quantity - original.received_quantity })
+    if (!items.length || invalid) { setReceiveError('Enter a valid quantity within the remaining amount.'); return }
+    setSubmitting(true); setReceiveError(null)
+    try { await purchasesApi.receive(viewingFor.id, { items }, token); setReceiving(false); await load(); await refreshDetail(viewingFor) } catch (err) { setReceiveError(err instanceof ApiError ? err.message : 'Unable to receive goods.') } finally { setSubmitting(false) }
+  }, [load, receiveQuantities, refreshDetail, token, viewingFor])
 
   return (
     <div className="space-y-6">
@@ -265,7 +290,7 @@ export function PurchasesPage() {
                     <td className="px-3 py-3 text-sm text-slate-600">{formatDate(p.created_at) ?? '-'}</td>
                       <td className="px-3 py-3 text-right">
                         <div className="inline-flex items-center gap-2">
-                          <button onClick={() => setViewingFor(p)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                          <button onClick={() => void refreshDetail(p)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
                             <ViewIcon className="h-3.5 w-3.5" />
                             View
                           </button>
@@ -276,6 +301,9 @@ export function PurchasesPage() {
                               Complete
                             </button>
                           )}
+                          {p.status === 'DRAFT' && canComplete ? (
+                            <button onClick={() => void onOrder(p.id)} className="rounded-md border border-indigo-300 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50">Order</button>
+                          ) : null}
                       
                           {p.status !== 'CANCELLED' && canCancel && (
                             <button onClick={() => void onCancel(p.id)} className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 transition-colors">
@@ -341,10 +369,24 @@ export function PurchasesPage() {
                 <div className="text-sm text-slate-500">Created</div>
                 <div className="text-sm font-medium">{formatDateTime(viewingFor.created_at) ?? '-'}</div>
               </div>
+              <div>
+                <div className="text-sm text-slate-500">Items</div>
+                <div className="mt-2 overflow-auto rounded-md border border-slate-200">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-500"><tr><th className="px-2 py-2">Product</th><th className="px-2 py-2">Ordered</th><th className="px-2 py-2">Received</th><th className="px-2 py-2">Remaining</th></tr></thead>
+                    <tbody>{(viewingFor.items ?? []).map((item) => <tr key={item.id} className="border-t border-slate-100"><td className="px-2 py-2">{item.product_id}</td><td className="px-2 py-2">{item.quantity}</td><td className="px-2 py-2">{item.received_quantity}</td><td className="px-2 py-2">{item.quantity - item.received_quantity}</td></tr>)}</tbody>
+                  </table>
+                </div>
+              </div>
+              {viewingFor.status === 'DRAFT' && canComplete ? <button onClick={() => void onOrder(viewingFor.id)} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white">Order PO</button> : null}
+              {(viewingFor.status === 'ORDERED' || viewingFor.status === 'PARTIALLY_RECEIVED') && canReceive ? <button onClick={() => { setReceiving(true); setReceiveError(null) }} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white">Receive Goods</button> : null}
+              {receipts.length > 0 ? <div><div className="text-sm text-slate-500">Receipt History</div>{receipts.map((receipt) => <div key={receipt.id} className="mt-1 text-sm">Receipt #{receipt.id}: {receipt.items.reduce((sum, item) => sum + item.quantity_received, 0)} units, {receipt.received_by_name || 'Unknown User'}</div>)}</div> : null}
             </div>
           </DialogContent>
         </Dialog>
       )}
+
+      {receiving && viewingFor ? <Dialog open={receiving} onOpenChange={setReceiving}><DialogContent><h3 className="text-lg font-semibold text-slate-900">Receive Goods</h3><div className="mt-4 space-y-3">{(viewingFor.items ?? []).map((item) => <label key={item.id} className="block text-sm text-slate-700">Product {item.product_id} (remaining {item.quantity - item.received_quantity})<input type="number" min="0" max={item.quantity - item.received_quantity} value={receiveQuantities[item.id] ?? ''} onChange={(e) => setReceiveQuantities((current) => ({ ...current, [item.id]: e.target.value }))} className="mt-1 block w-full rounded-md border-slate-200" /></label>)}{receiveError ? <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{receiveError}</div> : null}<div className="flex justify-end gap-2"><button onClick={() => setReceiving(false)} className="rounded-md border border-slate-200 px-3 py-2 text-sm">Cancel</button><button onClick={() => void onReceive()} disabled={submitting} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white">Receive Goods</button></div></div></DialogContent></Dialog> : null}
     </div>
   )
 }

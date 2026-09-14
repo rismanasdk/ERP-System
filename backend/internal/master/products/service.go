@@ -12,12 +12,17 @@ import (
 )
 
 type Service struct {
-	repo     *Repository
-	auditSvc *audit.Service
+	repo       *Repository
+	auditSvc   *audit.Service
+	categories interface {
+		Exists(context.Context, int64) (bool, error)
+	}
 }
 
-func NewService(repo *Repository, auditSvc *audit.Service) *Service {
-	return &Service{repo: repo, auditSvc: auditSvc}
+func NewService(repo *Repository, auditSvc *audit.Service, categoryRepo interface {
+	Exists(context.Context, int64) (bool, error)
+}) *Service {
+	return &Service{repo: repo, auditSvc: auditSvc, categories: categoryRepo}
 }
 
 var (
@@ -56,6 +61,9 @@ func (s *Service) Create(ctx context.Context, product *Product) (int64, error) {
 		return 0, err
 	}
 	normalizeOptionalStrings(product)
+	if err := s.validateCategory(ctx, product.CategoryID); err != nil {
+		return 0, err
+	}
 
 	if existing, err := s.repo.GetBySKU(ctx, product.SKU); err == nil && existing != nil {
 		return 0, ErrProductDuplicateSKU
@@ -125,6 +133,9 @@ func (s *Service) Update(ctx context.Context, product *Product) error {
 		return err
 	}
 	normalizeOptionalStrings(product)
+	if err := s.validateCategory(ctx, product.CategoryID); err != nil {
+		return err
+	}
 
 	if existingSKU, err := s.repo.GetBySKU(ctx, product.SKU); err == nil && existingSKU != nil && existingSKU.ID != product.ID {
 		return ErrProductDuplicateSKU
@@ -238,6 +249,23 @@ func validateProduct(product *Product) error {
 	}
 	if product.SellingPrice < 0 {
 		return &ValidationError{Field: "selling_price", Message: "selling_price must be greater than or equal to 0"}
+	}
+	if product.MinimumStock < 0 {
+		return &ValidationError{Field: "minimum_stock", Message: "minimum_stock must be greater than or equal to 0"}
+	}
+	return nil
+}
+
+func (s *Service) validateCategory(ctx context.Context, categoryID *int64) error {
+	if categoryID == nil || s.categories == nil {
+		return nil
+	}
+	exists, err := s.categories.Exists(ctx, *categoryID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return &ValidationError{Field: "category_id", Message: "category does not exist"}
 	}
 	return nil
 }

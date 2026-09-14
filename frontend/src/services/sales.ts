@@ -1,5 +1,5 @@
 import type { ApiEnvelope } from '../types/auth'
-import type { Sale, SaleFilter, CreateSaleInput } from '../types/sale'
+import type { Sale, SaleFilter, CreateSaleInput, SaleFulfillment, FulfillSaleInput } from '../types/sale'
 import { api } from '../lib/api'
 
 export const salesApi = {
@@ -30,4 +30,8 @@ export const salesApi = {
     const res = await api.post<ApiEnvelope<{ id: number; status: string }>>(`/api/v1/sales/${id}/cancel`, undefined, token)
     return res.data
   },
+
+  confirm: async (id: number, token?: string) => (await api.post<ApiEnvelope<{ id: number; status: string }>>(`/api/v1/sales/${id}/confirm`, undefined, token)).data,
+  fulfill: async (id: number, payload: FulfillSaleInput, token?: string) => (await api.post<ApiEnvelope<{ id: number }>>(`/api/v1/sales/${id}/fulfill`, payload, token)).data,
+  listFulfillments: async (id: number, token?: string): Promise<SaleFulfillment[]> => (await api.get<ApiEnvelope<SaleFulfillment[]>>(`/api/v1/sales/${id}/fulfillments`, token)).data ?? [],
 }

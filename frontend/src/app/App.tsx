@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth'
 import { DashboardPage } from '../pages/DashboardPage'
 import { LoginPage } from '../pages/LoginPage'
 import { ProductsPage } from '../pages/ProductsPage'
+import { ProductCategoriesPage } from '../pages/ProductCategoriesPage'
 import { BranchesPage } from '../pages/BranchesPage'
 import { CustomersPage } from '../pages/CustomersPage'
 import { SuppliersPage } from '../pages/SuppliersPage'
@@ -19,6 +20,7 @@ import { UsersPage } from '../pages/UsersPage'
 import { RolesPage } from '../pages/RolesPage'
 import { ConfirmDialogProvider } from '../utils/confirmUtils'
 import { BranchProvider } from '../contexts/BranchContext'
+import { ToastProvider } from '../components/ui/toast'
 
 function AppRoutes() {
   const { isAuthenticated } = useAuth()
@@ -37,6 +39,7 @@ function AppRoutes() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/app/dashboard" element={<DashboardPage />} />
         <Route path="/products" element={<ProductsPage />} />
+        <Route path="/product-categories" element={<ProductCategoriesPage />} />
         <Route path="/organization" element={<OrganizationPage />} />
         <Route path="/users" element={<UsersPage />} />
           <Route path="/roles" element={<RolesPage />} />
@@ -49,6 +52,7 @@ function AppRoutes() {
         <Route path="/sales" element={<SalesPage />} />
         <Route path="/reports" element={<SalesReportPage />} />
         <Route path="/app/products" element={<ProductsPage />} />
+        <Route path="/app/product-categories" element={<ProductCategoriesPage />} />
         <Route path="/app/organization" element={<OrganizationPage />} />
         <Route path="/app/users" element={<UsersPage />} />
           <Route path="/app/roles" element={<RolesPage />} />
@@ -70,11 +74,13 @@ export default function App() {
   return (
     <AuthProvider>
       <BranchProvider>
-        <ConfirmDialogProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-        </ConfirmDialogProvider>
+        <ToastProvider>
+          <ConfirmDialogProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </ConfirmDialogProvider>
+        </ToastProvider>
       </BranchProvider>
     </AuthProvider>
   )

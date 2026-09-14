@@ -49,6 +49,16 @@ func (s *fakePurchasingService) CancelPurchase(ctx context.Context, purchaseID i
 	return s.cancelErr
 }
 
+func (s *fakePurchasingService) OrderPurchase(ctx context.Context, purchaseID int64) error {
+	return nil
+}
+func (s *fakePurchasingService) ReceivePurchase(ctx context.Context, purchaseID int64, input ReceivePurchaseInput) (int64, error) {
+	return 1, nil
+}
+func (s *fakePurchasingService) ListReceipts(ctx context.Context, purchaseID int64) ([]PurchaseReceipt, error) {
+	return []PurchaseReceipt{}, nil
+}
+
 func TestPurchaseHandler_Create_InvalidBody(t *testing.T) {
 	service := &fakePurchasingService{}
 	handler := NewHandler(service)

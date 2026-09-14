@@ -40,6 +40,22 @@ func (s *fakeInventoryService) List(ctx context.Context, branchID, productID *in
 	return s.listItems, s.listErr
 }
 
+func (s *fakeInventoryService) ListMovements(ctx context.Context, branchID, productID *int64) ([]StockMovement, error) {
+	return []StockMovement{{ID: 1, ProductID: 10, BranchID: 20, MovementType: MovementTypeIN, QuantityDelta: 5}}, nil
+}
+
+func (s *fakeInventoryService) CreateTransfer(ctx context.Context, input CreateTransferInput) (int64, error) {
+	return 1, nil
+}
+
+func (s *fakeInventoryService) ListTransfers(ctx context.Context) ([]StockTransfer, error) {
+	return []StockTransfer{}, nil
+}
+
+func (s *fakeInventoryService) GetTransfer(ctx context.Context, id int64) (*StockTransfer, error) {
+	return nil, nil
+}
+
 func (s *fakeInventoryService) GetByID(ctx context.Context, id int64) (*Inventory, error) {
 	return s.getItem, s.getErr
 }

@@ -364,13 +364,13 @@ func TestPurchaseItemRepository_GetByID(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, created_at, updated_at
+		SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, received_quantity, created_at, updated_at
         FROM purchase_items
         WHERE id = $1
     `)).
 		WithArgs(int64(21)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "purchase_id", "product_id", "quantity", "unit_cost", "subtotal", "created_at", "updated_at"}).AddRow(
-			int64(21), int64(11), int64(20), int64(5), float64(10.00), float64(50.00), now, now,
+		WillReturnRows(sqlmock.NewRows([]string{"id", "purchase_id", "product_id", "quantity", "unit_cost", "subtotal", "received_quantity", "created_at", "updated_at"}).AddRow(
+			int64(21), int64(11), int64(20), int64(5), float64(10.00), float64(50.00), int64(0), now, now,
 		))
 
 	item, err := repo.GetPurchaseItemByID(context.Background(), 21)
@@ -397,14 +397,14 @@ func TestPurchaseItemRepository_ListByPurchaseID(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, created_at, updated_at
+		SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, received_quantity, created_at, updated_at
         FROM purchase_items
         WHERE purchase_id = $1
         ORDER BY id ASC
     `)).
 		WithArgs(int64(11)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "purchase_id", "product_id", "quantity", "unit_cost", "subtotal", "created_at", "updated_at"}).AddRow(
-			int64(21), int64(11), int64(20), int64(5), float64(10.00), float64(50.00), now, now,
+		WillReturnRows(sqlmock.NewRows([]string{"id", "purchase_id", "product_id", "quantity", "unit_cost", "subtotal", "received_quantity", "created_at", "updated_at"}).AddRow(
+			int64(21), int64(11), int64(20), int64(5), float64(10.00), float64(50.00), int64(0), now, now,
 		))
 
 	items, err := repo.ListPurchaseItemsByPurchaseID(context.Background(), 11)

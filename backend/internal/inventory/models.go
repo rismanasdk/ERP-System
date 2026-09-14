@@ -20,8 +20,25 @@ type StockMovement struct {
 	ReferenceType *string        `json:"reference_type,omitempty"`
 	ReferenceID   *int64         `json:"reference_id,omitempty"`
 	ActorUserID   *int64         `json:"actor_user_id,omitempty"`
+	ActorUserName *string        `json:"actor_user_name,omitempty"`
 	Metadata      map[string]any `json:"metadata,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
+}
+
+type StockTransfer struct {
+	ID                    int64     `json:"id"`
+	SourceBranchID        int64     `json:"source_branch_id"`
+	SourceBranchName      string    `json:"source_branch_name,omitempty"`
+	DestinationBranchID   int64     `json:"destination_branch_id"`
+	DestinationBranchName string    `json:"destination_branch_name,omitempty"`
+	ProductID             int64     `json:"product_id"`
+	Quantity              int64     `json:"quantity"`
+	Status                string    `json:"status"`
+	Notes                 *string   `json:"notes,omitempty"`
+	CreatedBy             int64     `json:"created_by"`
+	CreatedByName         string    `json:"created_by_name,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	CompletedAt           time.Time `json:"completed_at"`
 }
 
 func NewInventory(productID, branchID, quantity int64) *Inventory {

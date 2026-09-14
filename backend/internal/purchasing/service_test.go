@@ -29,6 +29,7 @@ type fakePurchaseRepo struct {
 	purchase                    *Purchase
 	purchaseItems               []PurchaseItem
 	updateStatusErr             error
+	receivedUpdates             map[int64]int64
 }
 
 func (r *fakePurchaseRepo) BeginTx(ctx context.Context) (*sql.Tx, error) {
@@ -74,6 +75,10 @@ func (r *fakePurchaseRepo) ListPurchases(ctx context.Context, filter PurchaseFil
 	return nil, nil
 }
 
+func (r *fakePurchaseRepo) ListPurchaseItemsByPurchaseID(ctx context.Context, purchaseID int64) ([]PurchaseItem, error) {
+	return r.purchaseItems, nil
+}
+
 func (r *fakePurchaseRepo) GetPurchaseByIDForUpdate(ctx context.Context, tx *sql.Tx, id int64) (*Purchase, error) {
 	if r.purchase == nil || r.purchase.ID != id {
 		return nil, sql.ErrNoRows
@@ -99,6 +104,26 @@ func (r *fakePurchaseRepo) UpdatePurchaseStatusWithTx(ctx context.Context, tx *s
 	return nil
 }
 
+func (r *fakePurchaseRepo) CreateReceiptWithTx(ctx context.Context, tx *sql.Tx, receipt *PurchaseReceipt) (int64, error) {
+	return 1, nil
+}
+func (r *fakePurchaseRepo) CreateReceiptItemWithTx(ctx context.Context, tx *sql.Tx, item *PurchaseReceiptItem) (int64, error) {
+	return 1, nil
+}
+func (r *fakePurchaseRepo) UpdatePurchaseItemReceivedWithTx(ctx context.Context, tx *sql.Tx, itemID, received int64) error {
+	if r.receivedUpdates == nil {
+		r.receivedUpdates = map[int64]int64{}
+	}
+	r.receivedUpdates[itemID] = received
+	return nil
+}
+func (r *fakePurchaseRepo) ListReceipts(ctx context.Context, purchaseID int64) ([]PurchaseReceipt, error) {
+	return nil, nil
+}
+func (r *fakePurchaseRepo) ListPurchaseItemsForReceiveWithTx(ctx context.Context, tx *sql.Tx, purchaseID int64) ([]PurchaseItem, error) {
+	return r.purchaseItems, nil
+}
+
 type fakeInventoryRepo struct {
 	getInventoryErr   error
 	inventory         *inventory.Inventory
@@ -108,6 +133,7 @@ type fakeInventoryRepo struct {
 	movementCount     int
 	movementCreated   bool
 	movementErr       error
+	movements         []inventory.StockMovement
 	createErrSequence []error
 	createAttempts    int
 }
@@ -118,6 +144,13 @@ func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, 
 	}
 	if r.inventory == nil {
 		return nil, sql.ErrNoRows
+	}
+	return r.inventory, nil
+}
+
+func (r *fakeInventoryRepo) EnsureInventoryWithTx(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error) {
+	if r.inventory == nil {
+		r.inventory = &inventory.Inventory{ID: 1, ProductID: productID, BranchID: branchID}
 	}
 	return r.inventory, nil
 }
@@ -139,6 +172,9 @@ func (r *fakeInventoryRepo) CreateWithTx(ctx context.Context, tx *sql.Tx, inv *i
 func (r *fakeInventoryRepo) UpdateQuantityWithTx(ctx context.Context, tx *sql.Tx, id, quantity int64) error {
 	r.updated = true
 	r.updatedCount++
+	if r.inventory != nil {
+		r.inventory.Quantity = quantity
+	}
 	return nil
 }
 
@@ -147,6 +183,7 @@ func (r *fakeInventoryRepo) CreateMovementWithTx(ctx context.Context, tx *sql.Tx
 		return 0, r.movementErr
 	}
 	r.movementCount++
+	r.movements = append(r.movements, *movement)
 	return 1, nil
 }
 
@@ -253,6 +290,54 @@ func TestCreatePurchase_Success(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestReceivePurchase_PartialAndFinalReceipt(t *testing.T) {
+	service, repo, invRepo, mock, cleanup := newServiceWithMocks(t)
+	defer cleanup()
+	repo.purchase = &Purchase{ID: 42, BranchID: 1, SupplierID: 3, PurchaseNumber: "PO-42", Status: "ORDERED"}
+	repo.purchaseItems = []PurchaseItem{{ID: 7, PurchaseID: 42, ProductID: 5, Quantity: 100, ReceivedQuantity: 0}}
+	invRepo.inventory = &inventory.Inventory{ID: 9, ProductID: 5, BranchID: 1, Quantity: 10}
+	service.authChecker = &fakeAuthChecker{allowed: true}
+	service.branchSvc = &fakeBranchService{}
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	receiptID, err := service.ReceivePurchase(auth.ContextWithUserID(context.Background(), 7), 42, ReceivePurchaseInput{Items: []ReceivePurchaseItemInput{{PurchaseItemID: 7, Quantity: 60}}})
+	if err != nil || receiptID != 1 {
+		t.Fatalf("expected partial receipt, got id=%d err=%v", receiptID, err)
+	}
+	if repo.receivedUpdates[7] != 60 || repo.purchase.Status != "PARTIALLY_RECEIVED" {
+		t.Fatalf("unexpected partial state: updates=%v status=%s", repo.receivedUpdates, repo.purchase.Status)
+	}
+	if len(invRepo.movements) != 1 || invRepo.movements[0].MovementType != "PURCHASE_RECEIPT" || invRepo.movements[0].QuantityDelta != 60 {
+		t.Fatalf("unexpected movement: %+v", invRepo.movements)
+	}
+
+	// A second call represents the remaining quantity and must complete the PO.
+	repo.purchase.Status = "PARTIALLY_RECEIVED"
+	repo.purchaseItems[0].ReceivedQuantity = 60
+	repo.receivedUpdates = nil
+	invRepo.movements = nil
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+	_, err = service.ReceivePurchase(auth.ContextWithUserID(context.Background(), 7), 42, ReceivePurchaseInput{Items: []ReceivePurchaseItemInput{{PurchaseItemID: 7, Quantity: 40}}})
+	if err != nil || repo.purchase.Status != "RECEIVED" {
+		t.Fatalf("expected final receipt, status=%s err=%v", repo.purchase.Status, err)
+	}
+}
+
+func TestReceivePurchase_RejectsOverReceive(t *testing.T) {
+	service, repo, _, mock, cleanup := newServiceWithMocks(t)
+	defer cleanup()
+	repo.purchase = &Purchase{ID: 42, BranchID: 1, Status: "ORDERED"}
+	repo.purchaseItems = []PurchaseItem{{ID: 7, PurchaseID: 42, ProductID: 5, Quantity: 10, ReceivedQuantity: 7}}
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+	_, err := service.ReceivePurchase(auth.ContextWithUserID(context.Background(), 7), 42, ReceivePurchaseInput{Items: []ReceivePurchaseItemInput{{PurchaseItemID: 7, Quantity: 4}}})
+	if !errors.Is(err, ErrReceiptExceedsRemaining) {
+		t.Fatalf("expected over-receive error, got %v", err)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 
 type inventoryRepository interface {
 	GetByProductAndBranchForUpdate(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error)
+	EnsureInventoryWithTx(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error)
 	CreateWithTx(ctx context.Context, tx *sql.Tx, inventory *inventory.Inventory) (int64, error)
 	UpdateQuantityWithTx(ctx context.Context, tx *sql.Tx, id, quantity int64) error
 	CreateMovementWithTx(ctx context.Context, tx *sql.Tx, movement *inventory.StockMovement) (int64, error)
@@ -44,9 +45,15 @@ type repositoryInterface interface {
 	CreatePurchaseItemWithTx(ctx context.Context, tx *sql.Tx, item *PurchaseItem) (int64, error)
 	GetSupplierByID(ctx context.Context, id int64) (*Supplier, error)
 	GetPurchaseByID(ctx context.Context, id int64) (*Purchase, error)
+	ListPurchaseItemsByPurchaseID(ctx context.Context, purchaseID int64) ([]PurchaseItem, error)
 	GetPurchaseByIDForUpdate(ctx context.Context, tx *sql.Tx, id int64) (*Purchase, error)
 	ListPurchaseItemsByPurchaseIDWithTx(ctx context.Context, tx *sql.Tx, purchaseID int64) ([]PurchaseItem, error)
+	ListPurchaseItemsForReceiveWithTx(ctx context.Context, tx *sql.Tx, purchaseID int64) ([]PurchaseItem, error)
 	UpdatePurchaseStatusWithTx(ctx context.Context, tx *sql.Tx, id int64, status string) error
+	CreateReceiptWithTx(ctx context.Context, tx *sql.Tx, receipt *PurchaseReceipt) (int64, error)
+	CreateReceiptItemWithTx(ctx context.Context, tx *sql.Tx, item *PurchaseReceiptItem) (int64, error)
+	UpdatePurchaseItemReceivedWithTx(ctx context.Context, tx *sql.Tx, itemID, received int64) error
+	ListReceipts(ctx context.Context, purchaseID int64) ([]PurchaseReceipt, error)
 	ListPurchases(ctx context.Context, filter PurchaseFilter) ([]Purchase, error)
 }
 
@@ -60,15 +67,18 @@ type Service struct {
 }
 
 const (
-	PurchaseCreatePermission   = "purchases.create"
-	PurchaseReadPermission     = "purchases.read"
-	PurchaseCompletePermission = "purchases.complete"
-	PurchaseCancelPermission   = "purchases.cancel"
-	PurchaseStatusDraft        = "DRAFT"
-	PurchaseStatusCompleted    = "COMPLETED"
-	PurchaseStatusCancelled    = "CANCELLED"
-	purchaseNumberRetryLimit   = 3
-	purchaseNumberRandomPrefix = 8
+	PurchaseCreatePermission        = "purchases.create"
+	PurchaseReadPermission          = "purchases.read"
+	PurchaseCompletePermission      = "purchases.complete"
+	PurchaseCancelPermission        = "purchases.cancel"
+	PurchaseStatusDraft             = "DRAFT"
+	PurchaseStatusOrdered           = "ORDERED"
+	PurchaseStatusPartiallyReceived = "PARTIALLY_RECEIVED"
+	PurchaseStatusReceived          = "RECEIVED"
+	PurchaseStatusCompleted         = "COMPLETED"
+	PurchaseStatusCancelled         = "CANCELLED"
+	purchaseNumberRetryLimit        = 3
+	purchaseNumberRandomPrefix      = 8
 )
 
 var (
@@ -87,6 +97,8 @@ var (
 	ErrPurchaseHasNoItems        = errors.New("purchase has no items")
 	ErrInsufficientStock         = errors.New("insufficient stock")
 	ErrInvalidPurchaseTransition = errors.New("invalid purchase status transition")
+	ErrReceiptExceedsRemaining   = errors.New("received quantity exceeds remaining quantity")
+	ErrPurchaseNotOrdered        = errors.New("purchase must be ordered before receiving")
 )
 
 type ValidationError struct {
@@ -109,6 +121,225 @@ type CreatePurchaseInput struct {
 	SupplierID int64                     `json:"supplier_id"`
 	Notes      *string                   `json:"notes,omitempty"`
 	Items      []CreatePurchaseItemInput `json:"items"`
+}
+
+type ReceivePurchaseItemInput struct {
+	PurchaseItemID int64 `json:"purchase_order_item_id"`
+	Quantity       int64 `json:"quantity_received"`
+}
+
+type ReceivePurchaseInput struct {
+	Notes *string                    `json:"notes,omitempty"`
+	Items []ReceivePurchaseItemInput `json:"items"`
+}
+
+func (s *Service) OrderPurchase(ctx context.Context, purchaseID int64) error {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return ErrAuthenticationRequired
+	}
+	allowed, err := s.authChecker.HasPermission(ctx, userID, PurchaseCompletePermission)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbidden
+	}
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	purchase, err := s.repo.GetPurchaseByIDForUpdate(ctx, tx, purchaseID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrPurchaseNotFound
+		}
+		return err
+	}
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, purchase.BranchID, true); err != nil {
+		return err
+	}
+	if purchase.Status != PurchaseStatusDraft {
+		return ErrInvalidPurchaseTransition
+	}
+	items, err := s.repo.ListPurchaseItemsByPurchaseIDWithTx(ctx, tx, purchaseID)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return ErrPurchaseHasNoItems
+	}
+	if err = s.repo.UpdatePurchaseStatusWithTx(ctx, tx, purchaseID, PurchaseStatusOrdered); err != nil {
+		return err
+	}
+	if s.auditSvc != nil {
+		resourceID := fmt.Sprintf("%d", purchaseID)
+		if _, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{ActorUserID: actorUserIDFromContext(ctx), Action: "purchase.order", Resource: "purchase", ResourceID: &resourceID}); err != nil {
+			return err
+		}
+	}
+	err = tx.Commit()
+	return err
+}
+
+func (s *Service) ReceivePurchase(ctx context.Context, purchaseID int64, input ReceivePurchaseInput) (receiptID int64, err error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return 0, ErrAuthenticationRequired
+	}
+	allowed, err := s.authChecker.HasPermission(ctx, userID, "purchases.receive")
+	if err != nil {
+		return 0, err
+	}
+	if !allowed {
+		return 0, ErrForbidden
+	}
+	if len(input.Items) == 0 {
+		return 0, &ValidationError{Field: "items", Message: "must contain at least one item"}
+	}
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	purchase, err := s.repo.GetPurchaseByIDForUpdate(ctx, tx, purchaseID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrPurchaseNotFound
+		}
+		return 0, err
+	}
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, purchase.BranchID, true); err != nil {
+		return 0, err
+	}
+	if purchase.Status != PurchaseStatusOrdered && purchase.Status != PurchaseStatusPartiallyReceived {
+		return 0, ErrPurchaseNotOrdered
+	}
+	items, err := s.repo.ListPurchaseItemsForReceiveWithTx(ctx, tx, purchaseID)
+	if err != nil {
+		return 0, err
+	}
+	byID := make(map[int64]PurchaseItem, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	seen := map[int64]bool{}
+	for _, received := range input.Items {
+		item, found := byID[received.PurchaseItemID]
+		if !found {
+			return 0, ErrPurchaseNotFound
+		}
+		if received.Quantity <= 0 {
+			return 0, &ValidationError{Field: "quantity_received", Message: "must be greater than zero"}
+		}
+		if seen[received.PurchaseItemID] || received.Quantity > item.Quantity-item.ReceivedQuantity {
+			return 0, ErrReceiptExceedsRemaining
+		}
+		seen[received.PurchaseItemID] = true
+	}
+	receipt := &PurchaseReceipt{PurchaseID: purchaseID, BranchID: purchase.BranchID, ReceivedBy: userID, Notes: input.Notes}
+	receiptID, err = s.repo.CreateReceiptWithTx(ctx, tx, receipt)
+	if err != nil {
+		return 0, err
+	}
+	totalReceived := int64(0)
+	for _, received := range input.Items {
+		item := byID[received.PurchaseItemID]
+		inventoryRow, invErr := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, purchase.BranchID)
+		if invErr != nil {
+			if !errors.Is(invErr, sql.ErrNoRows) {
+				return 0, invErr
+			}
+			inventoryRow, err = s.inventoryRepo.EnsureInventoryWithTx(ctx, tx, item.ProductID, purchase.BranchID)
+			if err != nil {
+				return 0, err
+			}
+			if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, inventoryRow.Quantity+received.Quantity); err != nil {
+				return 0, err
+			}
+		} else if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, inventoryRow.Quantity+received.Quantity); err != nil {
+			return 0, err
+		}
+		if _, err = s.repo.CreateReceiptItemWithTx(ctx, tx, &PurchaseReceiptItem{ReceiptID: receiptID, PurchaseItemID: item.ID, ProductID: item.ProductID, QuantityReceived: received.Quantity}); err != nil {
+			return 0, err
+		}
+		newReceived := item.ReceivedQuantity + received.Quantity
+		if err = s.repo.UpdatePurchaseItemReceivedWithTx(ctx, tx, item.ID, newReceived); err != nil {
+			return 0, err
+		}
+		movement := &inventory.StockMovement{ProductID: item.ProductID, BranchID: purchase.BranchID, MovementType: "PURCHASE_RECEIPT", QuantityDelta: received.Quantity, ReferenceType: inventory.PtrString("purchase_receipt"), ReferenceID: &receiptID, ActorUserID: actorUserIDFromContext(ctx)}
+		if _, err = s.inventoryRepo.CreateMovementWithTx(ctx, tx, movement); err != nil {
+			return 0, err
+		}
+		totalReceived += received.Quantity
+	}
+	allReceived := true
+	for _, item := range items {
+		if item.ReceivedQuantity+quantityFor(item.ID, input.Items) < item.Quantity {
+			allReceived = false
+			break
+		}
+	}
+	status := PurchaseStatusPartiallyReceived
+	if allReceived {
+		status = PurchaseStatusReceived
+	}
+	if err = s.repo.UpdatePurchaseStatusWithTx(ctx, tx, purchaseID, status); err != nil {
+		return 0, err
+	}
+	if s.auditSvc != nil {
+		resourceID := fmt.Sprintf("%d", receiptID)
+		if _, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{ActorUserID: actorUserIDFromContext(ctx), Action: "purchase.receive", Resource: "purchase_receipt", ResourceID: &resourceID, Metadata: map[string]any{"purchase_id": purchaseID, "branch_id": purchase.BranchID, "quantity": totalReceived}}); err != nil {
+			return 0, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return receiptID, nil
+}
+
+func quantityFor(itemID int64, items []ReceivePurchaseItemInput) int64 {
+	for _, item := range items {
+		if item.PurchaseItemID == itemID {
+			return item.Quantity
+		}
+	}
+	return 0
+}
+
+func (s *Service) ListReceipts(ctx context.Context, purchaseID int64) ([]PurchaseReceipt, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return nil, ErrAuthenticationRequired
+	}
+	allowed, err := s.authChecker.HasPermission(ctx, userID, PurchaseReadPermission)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrForbidden
+	}
+	purchase, err := s.repo.GetPurchaseByID(ctx, purchaseID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrPurchaseNotFound
+		}
+		return nil, err
+	}
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, purchase.BranchID, true); err != nil {
+		return nil, err
+	}
+	return s.repo.ListReceipts(ctx, purchaseID)
 }
 
 func NewService(repo repositoryInterface, inventoryRepo inventoryRepository, productSvc productService, branchSvc branchService, authChecker auth.PermissionChecker, auditSvc auditService) *Service {
@@ -288,6 +519,10 @@ func (s *Service) GetPurchase(ctx context.Context, id int64) (*Purchase, error) 
 		return nil, ErrAuthenticationRequired
 	}
 	if err := s.branchSvc.EnsureUserHasAccess(ctx, userID, purchase.BranchID, true); err != nil {
+		return nil, err
+	}
+	purchase.Items, err = s.repo.ListPurchaseItemsByPurchaseID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 	return purchase, nil

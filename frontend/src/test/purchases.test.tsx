@@ -14,6 +14,9 @@ vi.mock('../services/purchases', () => ({
     create: vi.fn(),
     complete: vi.fn(),
     cancel: vi.fn(),
+    order: vi.fn(),
+    receive: vi.fn(),
+    listReceipts: vi.fn(),
   },
 }))
 
@@ -219,5 +222,32 @@ describe('PurchasesPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText(/you do not have access to purchases/i)).toBeInTheDocument())
+  })
+
+  it('shows PO items and receives remaining goods', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['purchases.read', 'purchases.receive'] }))
+    const purchase = { id: 12, branch_id: 2, supplier_id: 7, purchase_number: 'PO-012', status: 'ORDERED', total_amount: 1000, created_by: 1, items: [{ id: 20, purchase_id: 12, product_id: 5, quantity: 10, received_quantity: 4, unit_cost: 100, subtotal: 1000 }] }
+    const listMock = purchasesApi.list as unknown as ReturnType<typeof vi.fn>
+    listMock.mockResolvedValue([purchase])
+    const detailMock = purchasesApi.getById as unknown as ReturnType<typeof vi.fn>
+    detailMock.mockResolvedValue(purchase)
+    const receiptsMock = purchasesApi.listReceipts as unknown as ReturnType<typeof vi.fn>
+    receiptsMock.mockResolvedValue([])
+    const receiveMock = purchasesApi.receive as unknown as ReturnType<typeof vi.fn>
+    receiveMock.mockResolvedValue({ id: 99 })
+    const branchMock = branchesApi.getById as unknown as ReturnType<typeof vi.fn>
+    branchMock.mockResolvedValue({ id: 2, name: 'Main Branch', code: 'MBR' })
+    const supplierMock = suppliersApi.getById as unknown as ReturnType<typeof vi.fn>
+    supplierMock.mockResolvedValue({ id: 7, code: 'SUP', name: 'Supply Co', is_active: true })
+
+    const user = userEvent.setup()
+    render(<MemoryRouter><AuthProvider><ConfirmDialogProvider><PurchasesPage /></ConfirmDialogProvider></AuthProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('PO-012')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /view/i }))
+    await waitFor(() => expect(screen.getByText('6')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /receive goods/i }))
+    await user.type(screen.getByRole('spinbutton'), '6')
+    await user.click(screen.getAllByRole('button', { name: /receive goods/i }).at(-1)!)
+    await waitFor(() => expect(receiveMock).toHaveBeenCalledWith(12, { items: [{ purchase_order_item_id: 20, quantity_received: 6 }] }, undefined))
   })
 })

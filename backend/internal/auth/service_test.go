@@ -260,6 +260,7 @@ func TestAuthenticate_AuditRecordedWithActor(t *testing.T) {
 		time.Now(),
 		time.Now(),
 	))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(true))
 	mock.ExpectQuery(regexp.QuoteMeta(`
         SELECT r.name
         FROM roles r
@@ -342,6 +343,7 @@ func TestAuthenticate_WrongPasswordFails(t *testing.T) {
 		time.Now(),
 		time.Now(),
 	))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(int64(123)).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(true))
 
 	user, perms, err := authService.Authenticate(ctx, email, "wrong-password")
 	if err == nil {
@@ -389,6 +391,7 @@ func TestAuthenticate_EmptyPasswordFails(t *testing.T) {
 		time.Now(),
 		time.Now(),
 	))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(int64(123)).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(true))
 
 	user, perms, err := authService.Authenticate(ctx, email, "")
 	if err == nil {
@@ -438,6 +441,7 @@ func TestAuthenticate_AuditFailureDoesNotFailAuthentication(t *testing.T) {
 		time.Now(),
 		time.Now(),
 	))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(true))
 	mock.ExpectQuery(regexp.QuoteMeta(`
         SELECT r.name
         FROM roles r
@@ -466,6 +470,36 @@ func TestAuthenticate_AuditFailureDoesNotFailAuthentication(t *testing.T) {
 		t.Fatalf("expected permissions [users.read], got %v", perms)
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestAuthenticate_InactiveUserFailsWithGenericCredentialsError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+	hashedPassword, err := password.Hash("password123")
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+	service := NewService(users.NewRepository(db), nil, nil, nil, nil)
+	email := "inactive@example.com"
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, email, password_hash, name, created_at, updated_at
+        FROM users
+        WHERE email = $1
+    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(int64(321), email, hashedPassword, "Inactive", time.Now(), time.Now()))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(int64(321)).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(false))
+	user, perms, err := service.Authenticate(context.Background(), email, "password123")
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected generic invalid credentials error, got %v", err)
+	}
+	if user != nil || perms != nil {
+		t.Fatalf("inactive authentication should return no session data: user=%v perms=%v", user, perms)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
 	}
@@ -503,6 +537,7 @@ func TestRefreshAccessToken_AuditRecordedWithActor(t *testing.T) {
 		nil,
 		timeNow,
 	))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(true))
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE refresh_tokens
         SET revoked_at = $1
@@ -607,6 +642,7 @@ func TestRefreshAccessToken_AuditFailureRollsBack(t *testing.T) {
 		nil,
 		timeNow,
 	))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(true))
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE refresh_tokens
         SET revoked_at = $1
@@ -913,6 +949,7 @@ func TestRefreshAccessToken_ValidRotation(t *testing.T) {
 		nil,
 		timeNow,
 	))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(int64(123)).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(true))
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE refresh_tokens
         SET revoked_at = $1
@@ -972,6 +1009,35 @@ func TestRefreshAccessToken_ValidRotation(t *testing.T) {
 		t.Fatalf("expected valid base64 refresh token, got %v", err)
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRefreshAccessToken_InactiveUserFails(t *testing.T) {
+	oldRefreshToken := "inactive-refresh-token"
+	hash := hashRefreshToken(oldRefreshToken)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+	userID := int64(321)
+	now := time.Now()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, user_id, token_hash, family_id, expires_at, revoked_at, created_at
+        FROM refresh_tokens
+        WHERE token_hash = $1
+    `)).WithArgs(hash).WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "family_id", "expires_at", "revoked_at", "created_at"}).AddRow(int64(1), userID, hash, "family", now.Add(24*time.Hour), nil, now))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(false))
+	mock.ExpectRollback()
+
+	service := NewService(users.NewRepository(db), nil, nil, NewRefreshTokenRepository(db), nil)
+	_, _, err = service.RefreshAccessToken(context.Background(), oldRefreshToken)
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("expected invalid refresh token error, got %v", err)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
 	}

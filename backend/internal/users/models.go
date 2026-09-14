@@ -9,6 +9,7 @@ type User struct {
 	Name         string    `json:"name,omitempty"`
 	RoleNames    []string  `json:"roles,omitempty"`
 	BranchIDs    []int64   `json:"branch_ids,omitempty"`
+	IsActive     bool      `json:"is_active"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }

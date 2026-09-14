@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import type { Product, ProductFilter } from '../types/product'
 import { productsApi } from '../services/products'
+import { categoriesApi } from '../services/categories'
+import type { ProductCategory } from '../types/category'
 import { readStoredAccessToken } from '../services/authSession'
 import { ProductForm } from '../components/products/ProductForm'
 import { ApiError } from '../lib/api'
-import { EditIcon, DeleteIcon, CreateIcon, CloseIcon, SearchIcon } from '../utils/iconsUtils'
+import { EditIcon, DeleteIcon, CreateIcon, CloseIcon, SearchIcon, ViewIcon } from '../utils/iconsUtils'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
 import { useConfirm } from '../utils/confirmUtils'
 import { usePagination, PaginationControl } from '../utils/paginationUtils'
 
@@ -19,10 +22,12 @@ export function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState({ search: '', active: '' })
+  const [filter, setFilter] = useState({ search: '', active: '', category_id: '' })
+  const [categories, setCategories] = useState<ProductCategory[]>([])
   const [editing, setEditing] = useState<Product | null>(null)
   const [creating, setCreating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [viewing, setViewing] = useState<Product | null>(null)
 
   const token = readStoredAccessToken() ?? undefined
 
@@ -38,6 +43,7 @@ export function ProductsPage() {
       const f: ProductFilter = {}
       if (filter.search) f.search = filter.search
       if (filter.active !== '') f.active = filter.active === 'true'
+      if (filter.category_id) f.category_id = Number(filter.category_id)
       const res = await productsApi.list(f, token)
       setProducts(res)
       resetPage() // balik ke halaman 1 tiap kali hasil filter berubah
@@ -123,6 +129,8 @@ export function ProductsPage() {
     }
   }, [load, canRead])
 
+  useEffect(() => { if (canRead) void categoriesApi.list({ active: true }, token).then(setCategories).catch(() => undefined) }, [canRead, token])
+
   if (!canRead) {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">You do not have permission to view products.</div>
@@ -184,6 +192,7 @@ export function ProductsPage() {
             <option value="true">Active</option>
             <option value="false">Inactive</option>
           </select>
+          <select aria-label="Product category filter" value={filter.category_id} onChange={(e) => setFilter((s) => ({ ...s, category_id: e.target.value }))} className="rounded-md border border-slate-200 px-3 py-2 text-sm"><option value="">All categories</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
           <button 
             onClick={() => void load()} 
             className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-50 transition-colors"
@@ -210,6 +219,7 @@ export function ProductsPage() {
                   <th className="px-3 py-3">Category</th>
                   <th className="px-3 py-3">Unit</th>
                   <th className="px-3 py-3">Selling</th>
+                  <th className="px-3 py-3">Minimum</th>
                   <th className="px-3 py-3">Active</th>
                   <th className="px-3 py-3 text-right">Actions</th>
                 </tr>
@@ -222,6 +232,7 @@ export function ProductsPage() {
                     <td className="px-3 py-3 text-sm text-slate-500">{p.category ?? '-'}</td>
                     <td className="px-3 py-3 text-sm text-slate-500">{p.unit ?? '-'}</td>
                     <td className="px-3 py-3 text-sm text-slate-500">{money(p.selling_price)}</td>
+                    <td className="px-3 py-3 text-sm text-slate-500">{p.minimum_stock}</td>
                     <td className="px-3 py-3 text-sm">
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${p.is_active ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-800'}`}>
                         {p.is_active ? 'Active' : 'Inactive'}
@@ -229,6 +240,7 @@ export function ProductsPage() {
                     </td>
                     <td className="px-3 py-3 text-sm text-right">
                       <div className="inline-flex items-center gap-2">
+                        <button type="button" onClick={() => setViewing(p)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700"><ViewIcon className="h-3.5 w-3.5" />View</button>
                         {canUpdate ? (
                           <button 
                             onClick={() => setEditing(p)} 
@@ -300,6 +312,7 @@ export function ProductsPage() {
               initial={editing ?? undefined}
               submitting={submitting}
               onSubmit={creating ? onCreate : onUpdate}
+              categories={categories}
               onCancel={() => {
                 setCreating(false)
                 setEditing(null)
@@ -308,6 +321,7 @@ export function ProductsPage() {
           </div>
         </div>
       )}
+      <Dialog open={Boolean(viewing)} onOpenChange={(open) => { if (!open) setViewing(null) }}><DialogContent><DialogHeader><DialogTitle>Product Details</DialogTitle><DialogDescription>View product master data.</DialogDescription></DialogHeader>{viewing && <div className="space-y-3 text-sm"><p><span className="text-slate-500">SKU:</span> {viewing.sku}</p><p><span className="text-slate-500">Name:</span> {viewing.name}</p><p><span className="text-slate-500">Description:</span> {viewing.description ?? '-'}</p><p><span className="text-slate-500">Category:</span> {viewing.category ?? '-'}</p><p><span className="text-slate-500">Unit:</span> {viewing.unit ?? '-'}</p><p><span className="text-slate-500">Cost:</span> {money(viewing.purchase_price)}</p><p><span className="text-slate-500">Selling:</span> {money(viewing.selling_price)}</p><p><span className="text-slate-500">Minimum Stock:</span> {viewing.minimum_stock}</p><p><span className="text-slate-500">Status:</span> {viewing.is_active ? 'Active' : 'Inactive'}</p></div>}</DialogContent></Dialog>
     </div>
   )
 }

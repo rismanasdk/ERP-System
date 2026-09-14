@@ -47,6 +47,14 @@ func (s *fakeSalesService) CancelSale(ctx context.Context, saleID int64) error {
 	return s.cancelErr
 }
 
+func (s *fakeSalesService) ConfirmSale(ctx context.Context, saleID int64) error { return nil }
+func (s *fakeSalesService) FulfillSale(ctx context.Context, saleID int64, input FulfillSaleInput) (int64, error) {
+	return 1, nil
+}
+func (s *fakeSalesService) ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error) {
+	return nil, nil
+}
+
 func TestSaleHandler_Create_InvalidBody(t *testing.T) {
 	service := &fakeSalesService{}
 	handler := NewHandler(service)

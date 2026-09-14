@@ -51,6 +51,21 @@ func (r *fakeSaleRepo) CreateSaleWithTx(ctx context.Context, tx *sql.Tx, sale *S
 	return sale.ID, nil
 }
 
+func (r *fakeSaleRepo) CreateFulfillmentWithTx(ctx context.Context, tx *sql.Tx, fulfillment *SaleFulfillment) (int64, error) {
+	fulfillment.ID = 1
+	return 1, nil
+}
+
+func (r *fakeSaleRepo) CreateFulfillmentItemWithTx(ctx context.Context, tx *sql.Tx, item *SaleFulfillmentItem) (int64, error) {
+	return 1, nil
+}
+func (r *fakeSaleRepo) UpdateSaleItemFulfilledWithTx(ctx context.Context, tx *sql.Tx, itemID, fulfilled int64) error {
+	return nil
+}
+func (r *fakeSaleRepo) ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error) {
+	return nil, nil
+}
+
 func (r *fakeSaleRepo) CreateSaleItemWithTx(ctx context.Context, tx *sql.Tx, item *SaleItem) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -71,6 +86,9 @@ func (r *fakeSaleRepo) GetSaleByID(ctx context.Context, id int64) (*Sale, error)
 	return &clone, nil
 }
 
+func (r *fakeInventoryRepo) EnsureInventoryWithTx(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error) {
+	return &inventory.Inventory{ID: productID*100000 + branchID, ProductID: productID, BranchID: branchID}, nil
+}
 func (r *fakeSaleRepo) GetSaleByIDForUpdate(ctx context.Context, tx *sql.Tx, id int64) (*Sale, error) {
 	return r.GetSaleByID(ctx, id)
 }
@@ -133,6 +151,40 @@ type fakeInventoryRepo struct {
 
 func newFakeInventoryRepo() *fakeInventoryRepo {
 	return &fakeInventoryRepo{quantities: make(map[int64]int64)}
+}
+
+func TestFulfillSale_PartialAndFinal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := newFakeSaleRepo()
+	repo.db = db
+	repo.sales[1] = &Sale{ID: 1, BranchID: 2, Status: SaleStatusConfirmed}
+	repo.itemsBySaleID[1] = []SaleItem{{ID: 10, SaleID: 1, ProductID: 5, Quantity: 10}}
+	inv := newFakeInventoryRepo()
+	inv.quantities[500002] = 10
+	service := NewService(repo, inv, &fakeProductService{products: map[int64]*products.Product{5: {ID: 5, IsActive: true}}}, &fakeBranchService{allowedBranches: []branches.Branch{{ID: 2, IsActive: true}}}, &fakeAuthChecker{allowed: true}, &fakeAuditService{})
+	ctx := auth.ContextWithUserID(context.Background(), 7)
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+	if _, err = service.FulfillSale(ctx, 1, FulfillSaleInput{Items: []FulfillSaleItemInput{{SaleItemID: 10, Quantity: 6}}}); err != nil {
+		t.Fatalf("partial fulfillment failed: %v", err)
+	}
+	if repo.sales[1].Status != SaleStatusPartiallyFulfilled || inv.quantities[500002] != 4 || len(inv.movements) != 1 || inv.movements[0].QuantityDelta != -6 {
+		t.Fatalf("unexpected partial result: sale=%+v inventory=%+v movements=%+v", repo.sales[1], inv.quantities, inv.movements)
+	}
+	repo.sales[1].Status = SaleStatusPartiallyFulfilled
+	repo.itemsBySaleID[1][0].FulfilledQuantity = 6
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+	if _, err = service.FulfillSale(ctx, 1, FulfillSaleInput{Items: []FulfillSaleItemInput{{SaleItemID: 10, Quantity: 4}}}); err != nil {
+		t.Fatalf("final fulfillment failed: %v", err)
+	}
+	if repo.sales[1].Status != SaleStatusFulfilled || inv.quantities[500002] != 0 {
+		t.Fatalf("unexpected final result: sale=%+v inventory=%+v", repo.sales[1], inv.quantities)
+	}
 }
 
 func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error) {

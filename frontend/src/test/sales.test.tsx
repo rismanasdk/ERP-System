@@ -14,6 +14,9 @@ vi.mock('../services/sales', () => ({
     create: vi.fn(),
     complete: vi.fn(),
     cancel: vi.fn(),
+    confirm: vi.fn(),
+    fulfill: vi.fn(),
+    listFulfillments: vi.fn(),
   },
 }))
 
@@ -30,9 +33,14 @@ vi.mock('../services/products', () => ({
   },
 }))
 
+vi.mock('../services/customers', () => ({
+  customersApi: { getById: vi.fn(), list: vi.fn() },
+}))
+
 import { salesApi } from '../services/sales'
 import { branchesApi } from '../services/branches'
 import { productsApi } from '../services/products'
+import { customersApi } from '../services/customers'
 
 afterEach(() => {
   localStorage.clear()
@@ -56,6 +64,8 @@ describe('SalesPage', () => {
 
     const branchMock = branchesApi.getById as unknown as ReturnType<typeof vi.fn>
     branchMock.mockResolvedValueOnce({ id: 2, name: 'Main Branch', code: 'MBR' })
+    const customerMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
+    customerMock.mockResolvedValue([])
 
     render(
       <MemoryRouter>
@@ -105,6 +115,8 @@ describe('SalesPage', () => {
     productListMock.mockResolvedValueOnce([
       { id: 5, sku: 'P-005', name: 'Widget', purchase_price: 1000, selling_price: 2000, is_active: true },
     ])
+    const customerListMock = customersApi.list as unknown as ReturnType<typeof vi.fn>
+    customerListMock.mockResolvedValueOnce([{ id: 3, code: 'C-003', name: 'Customer One', is_active: true }])
 
     const branchListMock = branchesApi.list as unknown as ReturnType<typeof vi.fn>
     branchListMock.mockResolvedValueOnce([
@@ -127,6 +139,7 @@ describe('SalesPage', () => {
 
     await waitFor(() => expect(screen.getByLabelText(/branch/i)).toBeInTheDocument())
     await user.selectOptions(screen.getByLabelText(/branch/i), '2')
+    await user.selectOptions(screen.getByLabelText(/customer/i), '3')
     await user.click(screen.getByRole('button', { name: /add item/i }))
     await user.selectOptions(screen.getByLabelText(/product/i), '5')
     await user.clear(screen.getByLabelText(/quantity/i))

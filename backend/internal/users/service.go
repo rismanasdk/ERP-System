@@ -21,6 +21,10 @@ var (
 	ErrUserDuplicateEmail = errors.New("email already exists")
 	ErrUserRoleNotFound   = errors.New("role not found")
 	ErrUserBranchNotFound = errors.New("branch not found")
+	ErrUserAccessDenied   = errors.New("user access denied")
+	ErrUserSelfDelete     = errors.New("cannot delete the authenticated user")
+	ErrProtectedUser      = errors.New("the SUPER_ADMIN user is protected")
+	ErrUserPrivilege      = errors.New("insufficient privilege for requested role or branch")
 )
 
 type Service struct {
@@ -34,11 +38,24 @@ func NewService(repo *Repository, roleRepo *roles.Repository, auditSvc *audit.Se
 }
 
 func (s *Service) List(ctx context.Context, filter UserFilter) ([]User, error) {
-	users, err := s.repo.List(ctx, filter)
+	actorID, scoped := actorIDFromContext(ctx)
+	var users []User
+	var err error
+	if scoped && !s.actorIsSuperAdmin(ctx, actorID) {
+		users, err = s.repo.ListAccessible(ctx, filter, actorID)
+	} else {
+		users, err = s.repo.List(ctx, filter)
+	}
 	if err != nil {
 		return nil, err
 	}
 	for i := range users {
+		if scoped {
+			users[i].IsActive, err = s.repo.GetActiveStatus(ctx, users[i].ID)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if users[i].RoleNames, err = s.repo.GetRoleNames(ctx, users[i].ID); err != nil {
 			return nil, err
 		}
@@ -57,6 +74,21 @@ func (s *Service) GetByID(ctx context.Context, id int64) (*User, error) {
 		}
 		return nil, err
 	}
+	if actorID, scoped := actorIDFromContext(ctx); scoped && !s.actorIsSuperAdmin(ctx, actorID) {
+		allowed, accessErr := s.repo.HasBranchAccess(ctx, actorID, id)
+		if accessErr != nil {
+			return nil, accessErr
+		}
+		if !allowed {
+			return nil, ErrUserAccessDenied
+		}
+	}
+	if _, scoped := actorIDFromContext(ctx); scoped {
+		user.IsActive, err = s.repo.GetActiveStatus(ctx, user.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	user.RoleNames, err = s.repo.GetRoleNames(ctx, user.ID)
 	if err != nil {
 		return nil, err
@@ -74,6 +106,14 @@ func (s *Service) Create(ctx context.Context, user *User, roleNames []string, br
 	}
 	if user.PasswordHash == "" {
 		return 0, ErrUserPasswordNeeded
+	}
+	if actorID, scoped := actorIDFromContext(ctx); scoped && !s.actorIsSuperAdmin(ctx, actorID) {
+		if err := s.validateRoleAssignments(ctx, actorID, roleNames); err != nil {
+			return 0, err
+		}
+		if err := s.validateBranchAssignments(ctx, actorID, branchIDs); err != nil {
+			return 0, err
+		}
 	}
 
 	if existing, err := s.repo.GetByEmail(ctx, user.Email); err == nil && existing != nil {
@@ -157,6 +197,11 @@ func (s *Service) Create(ctx context.Context, user *User, roleNames []string, br
 	if err = tx.Commit(); err != nil {
 		return 0, err
 	}
+	if _, scoped := actorIDFromContext(ctx); scoped {
+		if err := s.repo.SetActiveStatus(ctx, id, user.IsActive); err != nil {
+			return 0, err
+		}
+	}
 	return id, nil
 }
 
@@ -174,6 +219,21 @@ func (s *Service) Update(ctx context.Context, user *User, roleNames []string, br
 			return ErrUserNotFound
 		}
 		return err
+	}
+	if actorID, scoped := actorIDFromContext(ctx); scoped && !s.actorIsSuperAdmin(ctx, actorID) {
+		allowed, accessErr := s.repo.HasBranchAccess(ctx, actorID, user.ID)
+		if accessErr != nil {
+			return accessErr
+		}
+		if !allowed {
+			return ErrUserAccessDenied
+		}
+		if err := s.validateRoleAssignments(ctx, actorID, roleNames); err != nil {
+			return err
+		}
+		if err := s.validateBranchAssignments(ctx, actorID, branchIDs); err != nil {
+			return err
+		}
 	}
 	if existing.Email != user.Email {
 		if other, err := s.repo.GetByEmail(ctx, user.Email); err == nil && other != nil && other.ID != user.ID {
@@ -267,6 +327,11 @@ func (s *Service) Update(ctx context.Context, user *User, roleNames []string, br
 	if err = tx.Commit(); err != nil {
 		return err
 	}
+	if _, scoped := actorIDFromContext(ctx); scoped {
+		if err := s.repo.SetActiveStatus(ctx, user.ID, user.IsActive); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -300,6 +365,25 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 			return ErrUserNotFound
 		}
 		return err
+	}
+	if actorID, scoped := actorIDFromContext(ctx); scoped {
+		if actorID == id {
+			return ErrUserSelfDelete
+		}
+		if !s.actorIsSuperAdmin(ctx, actorID) {
+			allowed, accessErr := s.repo.HasBranchAccess(ctx, actorID, id)
+			if accessErr != nil {
+				return accessErr
+			}
+			if !allowed {
+				return ErrUserAccessDenied
+			}
+		}
+	}
+	if rolesForUser, err := s.repo.GetRoleNames(ctx, id); err != nil {
+		return err
+	} else if containsRole(rolesForUser, "SUPER_ADMIN") {
+		return ErrProtectedUser
 	}
 
 	tx, err := s.repo.BeginTx(ctx)
@@ -364,6 +448,72 @@ func validateUser(user *User) error {
 	return nil
 }
 
+func (s *Service) validateBranchAssignments(ctx context.Context, actorID int64, branchIDs []int64) error {
+	if len(branchIDs) == 0 {
+		return ErrUserPrivilege
+	}
+	for _, branchID := range branchIDs {
+		if branchID <= 0 {
+			continue
+		}
+		allowed, err := s.repo.HasBranchAccess(ctx, actorID, branchID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return ErrUserPrivilege
+		}
+	}
+	return nil
+}
+
+func (s *Service) validateRoleAssignments(ctx context.Context, actorID int64, roleNames []string) error {
+	actorPermissions, err := s.repo.GetPermissionNames(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	allowed := make(map[string]bool, len(actorPermissions))
+	for _, permission := range actorPermissions {
+		allowed[permission] = true
+	}
+	for _, roleName := range roleNames {
+		role, err := s.roleRepo.GetByName(ctx, strings.TrimSpace(roleName))
+		if err != nil {
+			return err
+		}
+		if role == nil {
+			return fmt.Errorf("%w: %s", ErrUserRoleNotFound, roleName)
+		}
+		if role.Name == "SUPER_ADMIN" {
+			return ErrUserPrivilege
+		}
+		permissions, err := s.roleRepo.GetPermissionNamesByRoleID(ctx, role.ID)
+		if err != nil {
+			return err
+		}
+		for _, permission := range permissions {
+			if !allowed[permission] {
+				return ErrUserPrivilege
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) actorIsSuperAdmin(ctx context.Context, actorID int64) bool {
+	rolesForUser, err := s.repo.GetRoleNames(ctx, actorID)
+	return err == nil && containsRole(rolesForUser, "SUPER_ADMIN")
+}
+
+func containsRole(roleNames []string, target string) bool {
+	for _, roleName := range roleNames {
+		if strings.EqualFold(strings.TrimSpace(roleName), target) {
+			return true
+		}
+	}
+	return false
+}
+
 func userActorIDFromContext(ctx context.Context) *int64 {
 	var userID int64
 	if value, ok := contextValueUserID(ctx); ok {
@@ -381,6 +531,10 @@ func contextValueUserID(ctx context.Context) (int64, bool) {
 		return value, true
 	}
 	return 0, false
+}
+
+func actorIDFromContext(ctx context.Context) (int64, bool) {
+	return contextValueUserID(ctx)
 }
 
 func normalizeUser(user *User) {

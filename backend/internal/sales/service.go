@@ -13,6 +13,7 @@ import (
 	"erp-system/backend/internal/auth"
 	"erp-system/backend/internal/branches"
 	"erp-system/backend/internal/inventory"
+	"erp-system/backend/internal/master/customers"
 	"erp-system/backend/internal/master/products"
 )
 
@@ -20,6 +21,11 @@ type inventoryRepository interface {
 	GetByProductAndBranchForUpdate(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error)
 	UpdateQuantityWithTx(ctx context.Context, tx *sql.Tx, id, quantity int64) error
 	CreateMovementWithTx(ctx context.Context, tx *sql.Tx, movement *inventory.StockMovement) (int64, error)
+	EnsureInventoryWithTx(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error)
+}
+
+type customerService interface {
+	GetByID(ctx context.Context, id int64) (*customers.Customer, error)
 }
 
 type productService interface {
@@ -46,6 +52,10 @@ type repositoryInterface interface {
 	ListSaleItemsBySaleID(ctx context.Context, saleID int64) ([]SaleItem, error)
 	ListSaleItemsBySaleIDWithTx(ctx context.Context, tx *sql.Tx, saleID int64) ([]SaleItem, error)
 	UpdateSaleStatusWithTx(ctx context.Context, tx *sql.Tx, id int64, status string) error
+	CreateFulfillmentWithTx(ctx context.Context, tx *sql.Tx, fulfillment *SaleFulfillment) (int64, error)
+	CreateFulfillmentItemWithTx(ctx context.Context, tx *sql.Tx, item *SaleFulfillmentItem) (int64, error)
+	UpdateSaleItemFulfilledWithTx(ctx context.Context, tx *sql.Tx, itemID, fulfilled int64) error
+	ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error)
 }
 
 type Service struct {
@@ -55,32 +65,42 @@ type Service struct {
 	branchSvc     branchService
 	authChecker   auth.PermissionChecker
 	auditSvc      auditService
+	customerSvc   customerService
 }
 
 const (
-	SaleCreatePermission   = "sales.create"
-	SaleReadPermission     = "sales.read"
-	SaleCompletePermission = "sales.complete"
-	SaleCancelPermission   = "sales.cancel"
-	SaleStatusDraft        = "DRAFT"
-	SaleStatusCompleted    = "COMPLETED"
-	SaleStatusCancelled    = "CANCELLED"
-	saleNumberRetryLimit   = 3
-	saleNumberRandomPrefix = 8
+	SaleCreatePermission         = "sales.create"
+	SaleReadPermission           = "sales.read"
+	SaleCompletePermission       = "sales.complete"
+	SaleConfirmPermission        = "sales.confirm"
+	SaleFulfillPermission        = "sales.fulfill"
+	SaleCancelPermission         = "sales.cancel"
+	SaleStatusDraft              = "DRAFT"
+	SaleStatusConfirmed          = "CONFIRMED"
+	SaleStatusPartiallyFulfilled = "PARTIALLY_FULFILLED"
+	SaleStatusFulfilled          = "FULFILLED"
+	SaleStatusCompleted          = "COMPLETED"
+	SaleStatusCancelled          = "CANCELLED"
+	saleNumberRetryLimit         = 3
+	saleNumberRandomPrefix       = 8
 )
 
 var (
-	ErrAuthenticationRequired = errors.New("authentication required")
-	ErrForbidden              = errors.New("permission denied")
-	ErrSaleNotFound           = errors.New("sale not found")
-	ErrProductNotFound        = errors.New("product not found")
-	ErrProductInactive        = errors.New("product is inactive")
-	ErrSaleHasNoItems         = errors.New("sale has no items")
-	ErrInsufficientStock      = errors.New("insufficient stock")
-	ErrInventoryNotFound      = errors.New("inventory not found")
-	ErrInvalidSaleTransition  = errors.New("invalid sale status transition")
-	ErrSaleAlreadyCompleted   = errors.New("sale already completed")
-	ErrSaleAlreadyCancelled   = errors.New("sale already cancelled")
+	ErrAuthenticationRequired      = errors.New("authentication required")
+	ErrForbidden                   = errors.New("permission denied")
+	ErrSaleNotFound                = errors.New("sale not found")
+	ErrProductNotFound             = errors.New("product not found")
+	ErrProductInactive             = errors.New("product is inactive")
+	ErrSaleHasNoItems              = errors.New("sale has no items")
+	ErrInsufficientStock           = errors.New("insufficient stock")
+	ErrInventoryNotFound           = errors.New("inventory not found")
+	ErrInvalidSaleTransition       = errors.New("invalid sale status transition")
+	ErrSaleAlreadyCompleted        = errors.New("sale already completed")
+	ErrSaleAlreadyCancelled        = errors.New("sale already cancelled")
+	ErrSaleNotConfirmed            = errors.New("sale must be confirmed before fulfillment")
+	ErrFulfillmentExceedsRemaining = errors.New("fulfilled quantity exceeds remaining quantity")
+	ErrCustomerNotFound            = errors.New("customer not found")
+	ErrCustomerInactive            = errors.New("customer is inactive")
 )
 
 type ValidationError struct {
@@ -99,13 +119,23 @@ type CreateSaleItemInput struct {
 }
 
 type CreateSaleInput struct {
-	BranchID int64                 `json:"branch_id"`
-	Notes    *string               `json:"notes,omitempty"`
-	Items    []CreateSaleItemInput `json:"items"`
+	CustomerID int64                 `json:"customer_id"`
+	BranchID   int64                 `json:"branch_id"`
+	Notes      *string               `json:"notes,omitempty"`
+	Items      []CreateSaleItemInput `json:"items"`
 }
 
-func NewService(repo repositoryInterface, inventoryRepo inventoryRepository, productSvc productService, branchSvc branchService, authChecker auth.PermissionChecker, auditSvc auditService) *Service {
-	return &Service{
+type FulfillSaleItemInput struct {
+	SaleItemID int64 `json:"sales_order_item_id"`
+	Quantity   int64 `json:"quantity_fulfilled"`
+}
+type FulfillSaleInput struct {
+	Notes *string                `json:"notes,omitempty"`
+	Items []FulfillSaleItemInput `json:"items"`
+}
+
+func NewService(repo repositoryInterface, inventoryRepo inventoryRepository, productSvc productService, branchSvc branchService, authChecker auth.PermissionChecker, auditSvc auditService, customerSvcs ...customerService) *Service {
+	service := &Service{
 		repo:          repo,
 		inventoryRepo: inventoryRepo,
 		productSvc:    productSvc,
@@ -113,6 +143,10 @@ func NewService(repo repositoryInterface, inventoryRepo inventoryRepository, pro
 		authChecker:   authChecker,
 		auditSvc:      auditSvc,
 	}
+	if len(customerSvcs) > 0 {
+		service.customerSvc = customerSvcs[0]
+	}
+	return service
 }
 
 func (s *Service) CreateSale(ctx context.Context, input CreateSaleInput) (saleID int64, err error) {
@@ -131,6 +165,21 @@ func (s *Service) CreateSale(ctx context.Context, input CreateSaleInput) (saleID
 
 	if len(input.Items) == 0 {
 		return 0, &ValidationError{Field: "items", Message: "must contain at least one item"}
+	}
+	if s.customerSvc != nil {
+		if input.CustomerID <= 0 {
+			return 0, &ValidationError{Field: "customer_id", Message: "must be provided"}
+		}
+		customer, customerErr := s.customerSvc.GetByID(ctx, input.CustomerID)
+		if customerErr != nil {
+			if errors.Is(customerErr, customers.ErrCustomerNotFound) {
+				return 0, ErrCustomerNotFound
+			}
+			return 0, customerErr
+		}
+		if !customer.IsActive {
+			return 0, ErrCustomerInactive
+		}
 	}
 	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, input.BranchID, true); err != nil {
 		return 0, err
@@ -186,6 +235,7 @@ func (s *Service) CreateSale(ctx context.Context, input CreateSaleInput) (saleID
 	}()
 
 	sale := &Sale{
+		CustomerID:  input.CustomerID,
 		BranchID:    input.BranchID,
 		SaleNumber:  generateSaleNumber(),
 		Status:      SaleStatusDraft,
@@ -267,6 +317,187 @@ func (s *Service) GetSale(ctx context.Context, id int64) (sale *Sale, items []Sa
 		return nil, nil, err
 	}
 	return sale, items, nil
+}
+
+func (s *Service) ConfirmSale(ctx context.Context, saleID int64) error {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return ErrAuthenticationRequired
+	}
+	allowed, err := s.authChecker.HasPermission(ctx, userID, SaleConfirmPermission)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbidden
+	}
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	sale, err := s.repo.GetSaleByIDForUpdate(ctx, tx, saleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrSaleNotFound
+		}
+		return err
+	}
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, sale.BranchID, true); err != nil {
+		return err
+	}
+	if sale.Status != SaleStatusDraft {
+		return ErrInvalidSaleTransition
+	}
+	items, err := s.repo.ListSaleItemsBySaleIDWithTx(ctx, tx, saleID)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return ErrSaleHasNoItems
+	}
+	if err = s.repo.UpdateSaleStatusWithTx(ctx, tx, saleID, SaleStatusConfirmed); err != nil {
+		return err
+	}
+	if s.auditSvc != nil {
+		resourceID := fmt.Sprintf("%d", saleID)
+		if _, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{ActorUserID: actorUserIDFromContext(ctx), Action: "sale.confirm", Resource: "sale", ResourceID: &resourceID}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Service) FulfillSale(ctx context.Context, saleID int64, input FulfillSaleInput) (fulfillmentID int64, err error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return 0, ErrAuthenticationRequired
+	}
+	allowed, err := s.authChecker.HasPermission(ctx, userID, SaleFulfillPermission)
+	if err != nil {
+		return 0, err
+	}
+	if !allowed {
+		return 0, ErrForbidden
+	}
+	if len(input.Items) == 0 {
+		return 0, &ValidationError{Field: "items", Message: "must contain at least one item"}
+	}
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	sale, err := s.repo.GetSaleByIDForUpdate(ctx, tx, saleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrSaleNotFound
+		}
+		return 0, err
+	}
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, sale.BranchID, true); err != nil {
+		return 0, err
+	}
+	if sale.Status != SaleStatusConfirmed && sale.Status != SaleStatusPartiallyFulfilled {
+		return 0, ErrSaleNotConfirmed
+	}
+	items, err := s.repo.ListSaleItemsBySaleIDWithTx(ctx, tx, saleID)
+	if err != nil {
+		return 0, err
+	}
+	byID := map[int64]SaleItem{}
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	seen := map[int64]bool{}
+	for _, inputItem := range input.Items {
+		item, found := byID[inputItem.SaleItemID]
+		if !found {
+			return 0, ErrSaleNotFound
+		}
+		if inputItem.Quantity <= 0 {
+			return 0, &ValidationError{Field: "quantity_fulfilled", Message: "must be greater than zero"}
+		}
+		if seen[inputItem.SaleItemID] || inputItem.Quantity > item.Quantity-item.FulfilledQuantity {
+			return 0, ErrFulfillmentExceedsRemaining
+		}
+		seen[inputItem.SaleItemID] = true
+	}
+	fulfillment := &SaleFulfillment{SaleID: saleID, BranchID: sale.BranchID, FulfilledBy: userID, Notes: input.Notes}
+	fulfillmentID, err = s.repo.CreateFulfillmentWithTx(ctx, tx, fulfillment)
+	if err != nil {
+		return 0, err
+	}
+	allFulfilled := true
+	for _, item := range items {
+		if item.FulfilledQuantity+quantityForSaleItem(item.ID, input.Items) < item.Quantity {
+			allFulfilled = false
+		}
+	}
+	for _, inputItem := range input.Items {
+		item := byID[inputItem.SaleItemID]
+		inv, invErr := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, sale.BranchID)
+		if invErr != nil {
+			if errors.Is(invErr, sql.ErrNoRows) {
+				return 0, ErrInventoryNotFound
+			}
+			return 0, invErr
+		}
+		if inv.Quantity < inputItem.Quantity {
+			return 0, ErrInsufficientStock
+		}
+		if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inv.ID, inv.Quantity-inputItem.Quantity); err != nil {
+			return 0, err
+		}
+		if _, err = s.repo.CreateFulfillmentItemWithTx(ctx, tx, &SaleFulfillmentItem{FulfillmentID: fulfillmentID, SaleItemID: item.ID, ProductID: item.ProductID, QuantityFulfilled: inputItem.Quantity}); err != nil {
+			return 0, err
+		}
+		if err = s.repo.UpdateSaleItemFulfilledWithTx(ctx, tx, item.ID, item.FulfilledQuantity+inputItem.Quantity); err != nil {
+			return 0, err
+		}
+		movement := &inventory.StockMovement{ProductID: item.ProductID, BranchID: sale.BranchID, MovementType: "SALES_OUT", QuantityDelta: -inputItem.Quantity, ReferenceType: inventory.PtrString("sales_fulfillment"), ReferenceID: &fulfillmentID, ActorUserID: actorUserIDFromContext(ctx)}
+		if _, err = s.inventoryRepo.CreateMovementWithTx(ctx, tx, movement); err != nil {
+			return 0, err
+		}
+	}
+	status := SaleStatusPartiallyFulfilled
+	if allFulfilled {
+		status = SaleStatusFulfilled
+	}
+	if err = s.repo.UpdateSaleStatusWithTx(ctx, tx, saleID, status); err != nil {
+		return 0, err
+	}
+	if s.auditSvc != nil {
+		resourceID := fmt.Sprintf("%d", fulfillmentID)
+		if _, err = s.auditSvc.RecordWithTx(ctx, tx, audit.AuditLog{ActorUserID: actorUserIDFromContext(ctx), Action: "sale.fulfill", Resource: "sales_fulfillment", ResourceID: &resourceID, Metadata: map[string]any{"sale_id": saleID, "branch_id": sale.BranchID}}); err != nil {
+			return 0, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return fulfillmentID, nil
+}
+
+func quantityForSaleItem(id int64, items []FulfillSaleItemInput) int64 {
+	for _, item := range items {
+		if item.SaleItemID == id {
+			return item.Quantity
+		}
+	}
+	return 0
+}
+
+func (s *Service) ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error) {
+	return s.repo.ListFulfillments(ctx, saleID)
 }
 
 func (s *Service) ListSales(ctx context.Context, filter SaleFilter) (sales []Sale, err error) {

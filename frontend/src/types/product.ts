@@ -5,9 +5,11 @@ export type Product = {
   name: string
   description?: string | null
   category?: string | null
+  category_id?: number | null
   unit?: string | null
   purchase_price: number
   selling_price: number
+  minimum_stock: number
   is_active: boolean
   created_at?: string
   updated_at?: string
@@ -17,4 +19,5 @@ export type Product = {
 export type ProductFilter = {
   search?: string
   active?: boolean
+  category_id?: number
 }

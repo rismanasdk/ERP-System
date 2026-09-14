@@ -5,6 +5,7 @@ import { BranchSelector } from './BranchSelector'
 import {
   DashboardIcon,
   ProductsIcon,
+  PackageIcon,
   CustomersIcon,
   BranchIcon,
   SuppliersIcon,
@@ -24,6 +25,7 @@ import {
 const navItems = [
   { label: 'Dashboard', to: '/dashboard', icon: DashboardIcon },
   { label: 'Products', to: '/products', icon: ProductsIcon, permission: 'products.read' },
+  { label: 'Product Categories', to: '/product-categories', icon: PackageIcon, permission: 'product_categories.read' },
   { label: 'Organization', to: '/organization', icon: OrganizationIcon },
   { label: 'Users', to: '/users', icon: UsersIcon, permission: 'users.read' },
   { label: 'Roles', to: '/roles', icon: RoleIcon, permission: 'roles.read' },
