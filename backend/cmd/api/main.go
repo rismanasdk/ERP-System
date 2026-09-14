@@ -14,6 +14,7 @@ import (
 	"erp-system/backend/internal/branches"
 	"erp-system/backend/internal/dashboard"
 	"erp-system/backend/internal/inventory"
+	"erp-system/backend/internal/master/categories"
 	"erp-system/backend/internal/master/customers"
 	"erp-system/backend/internal/master/products"
 	"erp-system/backend/internal/master/suppliers"
@@ -73,6 +74,9 @@ func main() {
 	auditRepo := audit.NewRepository(db)
 	auditService := audit.NewService(auditRepo)
 	roleHandler := roles.NewHandler(roleRepo)
+	categoryRepo := categories.NewRepository(db)
+	categoryService := categories.NewService(categoryRepo)
+	categoryHandler := categories.NewHandler(categoryService)
 	refreshRepo := auth.NewRefreshTokenRepository(db)
 	authService := auth.NewService(userRepo, roleRepo, permRepo, refreshRepo, auditService)
 	authHandler := auth.NewHandler(authService)
@@ -92,7 +96,7 @@ func main() {
 	reportingHandler := reporting.NewHandler(reportingSvc)
 
 	productRepo := products.NewRepository(db)
-	productService := products.NewService(productRepo, auditService)
+	productService := products.NewService(productRepo, auditService, categoryRepo)
 	productHandler := products.NewHandler(productService)
 
 	customerRepo := customers.NewRepository(db)
@@ -112,7 +116,7 @@ func main() {
 	purchaseHandler := purchasing.NewHandler(purchaseService)
 
 	saleRepo := sales.NewRepository(db)
-	saleService := sales.NewService(saleRepo, inventoryRepo, productService, branchService, authService, auditService)
+	saleService := sales.NewService(saleRepo, inventoryRepo, productService, branchService, authService, auditService, customerService)
 	saleHandler := sales.NewHandler(saleService)
 
 	authMiddleware := auth.NewMiddleware(authService)
@@ -147,6 +151,11 @@ func main() {
 		response.JSONOK(w, items)
 	})))).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/roles/{id}", corsPreflightHandler).Methods(http.MethodOptions)
+	router.Handle("/api/v1/product-categories", authMiddleware.Authenticate(authMiddleware.RequirePermission("product_categories.read")(http.HandlerFunc(categoryHandler.List)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/product-categories/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("product_categories.read")(http.HandlerFunc(categoryHandler.Get)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/product-categories", authMiddleware.Authenticate(authMiddleware.RequirePermission("product_categories.create")(http.HandlerFunc(categoryHandler.Create)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/product-categories/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("product_categories.update")(http.HandlerFunc(categoryHandler.Update)))).Methods(http.MethodPut)
+	router.Handle("/api/v1/product-categories/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("product_categories.delete")(http.HandlerFunc(categoryHandler.Delete)))).Methods(http.MethodDelete)
 	router.Handle("/api/v1/branches", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.read")(http.HandlerFunc(branchHandler.List)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/branches/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.read")(http.HandlerFunc(branchHandler.Get)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/branches", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.create")(http.HandlerFunc(branchHandler.Create)))).Methods(http.MethodPost)
@@ -231,9 +240,14 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 
 func registerInventoryRoutes(router *mux.Router, middleware *auth.Middleware, handler *inventory.Handler) {
 	router.Handle("/api/v1/inventory", middleware.Authenticate(middleware.RequirePermission("inventory.read")(http.HandlerFunc(handler.List)))).Methods(http.MethodGet)
-	router.Handle("/api/v1/inventory/{id}", middleware.Authenticate(middleware.RequirePermission("inventory.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/inventory/movements", middleware.Authenticate(middleware.RequirePermission("inventory.read")(http.HandlerFunc(handler.ListMovements)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/inventory", middleware.Authenticate(middleware.RequirePermission("inventory.create")(http.HandlerFunc(handler.Create)))).Methods(http.MethodPost)
 	router.Handle("/api/v1/inventory/{id}/adjust", middleware.Authenticate(middleware.RequirePermission("inventory.adjust")(http.HandlerFunc(handler.Adjust)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/inventory/transfers", middleware.Authenticate(middleware.RequirePermission("inventory.adjust")(http.HandlerFunc(handler.CreateTransfer)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/inventory/transfers", middleware.Authenticate(middleware.RequirePermission("inventory.read")(http.HandlerFunc(handler.ListTransfers)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/inventory/transfers/{id}", middleware.Authenticate(middleware.RequirePermission("inventory.read")(http.HandlerFunc(handler.GetTransfer)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/inventory/{id}", middleware.Authenticate(middleware.RequirePermission("inventory.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/inventory/{id}/movements", middleware.Authenticate(middleware.RequirePermission("inventory.read")(http.HandlerFunc(handler.ListMovements)))).Methods(http.MethodGet)
 }
 
 func registerPurchasingRoutes(router *mux.Router, middleware *auth.Middleware, handler *purchasing.Handler) {
@@ -241,6 +255,9 @@ func registerPurchasingRoutes(router *mux.Router, middleware *auth.Middleware, h
 	router.Handle("/api/v1/purchases", middleware.Authenticate(middleware.RequirePermission("purchases.read")(http.HandlerFunc(handler.List)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/purchases/{id}", middleware.Authenticate(middleware.RequirePermission("purchases.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/purchases/{id}/complete", middleware.Authenticate(middleware.RequirePermission(purchasing.PurchaseCompletePermission)(http.HandlerFunc(handler.Complete)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/purchases/{id}/order", middleware.Authenticate(middleware.RequirePermission(purchasing.PurchaseCompletePermission)(http.HandlerFunc(handler.Order)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/purchases/{id}/receive", middleware.Authenticate(middleware.RequirePermission("purchases.receive")(http.HandlerFunc(handler.Receive)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/purchases/{id}/receipts", middleware.Authenticate(middleware.RequirePermission(purchasing.PurchaseReadPermission)(http.HandlerFunc(handler.Receipts)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/purchases/{id}/cancel", middleware.Authenticate(middleware.RequirePermission(purchasing.PurchaseCancelPermission)(http.HandlerFunc(handler.Cancel)))).Methods(http.MethodPost)
 }
 
@@ -249,6 +266,9 @@ func registerSalesRoutes(router *mux.Router, middleware *auth.Middleware, handle
 	router.Handle("/api/v1/sales", middleware.Authenticate(middleware.RequirePermission("sales.read")(http.HandlerFunc(handler.List)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/sales/{id}", middleware.Authenticate(middleware.RequirePermission("sales.read")(http.HandlerFunc(handler.Get)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/sales/{id}/complete", middleware.Authenticate(middleware.RequirePermission(sales.SaleCompletePermission)(http.HandlerFunc(handler.Complete)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/sales/{id}/confirm", middleware.Authenticate(middleware.RequirePermission(sales.SaleConfirmPermission)(http.HandlerFunc(handler.Confirm)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/sales/{id}/fulfill", middleware.Authenticate(middleware.RequirePermission(sales.SaleFulfillPermission)(http.HandlerFunc(handler.Fulfill)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/sales/{id}/fulfillments", middleware.Authenticate(middleware.RequirePermission(sales.SaleReadPermission)(http.HandlerFunc(handler.Fulfillments)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/sales/{id}/cancel", middleware.Authenticate(middleware.RequirePermission(sales.SaleCancelPermission)(http.HandlerFunc(handler.Cancel)))).Methods(http.MethodPost)
 }
 

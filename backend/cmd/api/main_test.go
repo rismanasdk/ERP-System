@@ -66,6 +66,29 @@ func (s *inventoryRouteService) GetByID(ctx context.Context, id int64) (*invento
 	return nil, inventory.ErrInventoryNotFound
 }
 
+func (s *inventoryRouteService) ListMovements(ctx context.Context, branchID, productID *int64) ([]inventory.StockMovement, error) {
+	userID, _ := auth.UserIDFromContext(ctx)
+	if branchID != nil && userID != 99 && *branchID != 1 {
+		return nil, branches.ErrBranchAccessDenied
+	}
+	if userID == 99 {
+		return []inventory.StockMovement{{ID: 1, ProductID: 101, BranchID: 1, MovementType: "IN", QuantityDelta: 10}}, nil
+	}
+	return []inventory.StockMovement{{ID: 1, ProductID: 101, BranchID: 1, MovementType: "IN", QuantityDelta: 10}}, nil
+}
+
+func (s *inventoryRouteService) CreateTransfer(context.Context, inventory.CreateTransferInput) (int64, error) {
+	return 1, nil
+}
+
+func (s *inventoryRouteService) ListTransfers(context.Context) ([]inventory.StockTransfer, error) {
+	return []inventory.StockTransfer{}, nil
+}
+
+func (s *inventoryRouteService) GetTransfer(context.Context, int64) (*inventory.StockTransfer, error) {
+	return nil, inventory.ErrTransferNotFound
+}
+
 func newInventoryTestRouter(service *inventoryRouteService, checker *inventoryRouteChecker) http.Handler {
 	router := mux.NewRouter()
 	middleware := auth.NewMiddleware(checker)
@@ -175,6 +198,23 @@ func TestInventoryRoutes_DenyUnauthorizedBranch(t *testing.T) {
 	}
 	if body["error"]["code"] != "FORBIDDEN" {
 		t.Fatalf("expected FORBIDDEN error, got %v", body)
+	}
+}
+
+func TestInventoryRoutes_StockMovementHistoryFiltersByReadableBranch(t *testing.T) {
+	service := &inventoryRouteService{items: []inventory.Inventory{{ID: 1, ProductID: 101, BranchID: 1, Quantity: 10}}}
+	checker := &inventoryRouteChecker{permissions: map[int64]map[string]bool{
+		10: {"inventory.read": true},
+	}}
+	router := newInventoryTestRouter(service, checker)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/inventory/movements?branch_id=2", nil)
+	req.Header.Set("Authorization", "Bearer "+inventoryToken(t, 10))
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unauthorized branch movement history, got %d", res.Code)
 	}
 }
 

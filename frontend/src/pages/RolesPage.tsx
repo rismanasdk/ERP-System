@@ -69,7 +69,7 @@ export function RolesPage() {
               <td className="px-3 py-3 text-sm">{role.permissions?.length ?? 0}</td>
               <td className="px-3 py-3 text-right">
                 <button type="button" onClick={() => setViewing(role)} className="mr-2 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs"><ViewIcon className="h-3 w-3" />View</button>
-                {canUpdate && !protectedRole && <button type="button" onClick={() => { setEditing(role); setPermissionError(null); void loadPermissions() }} className="mr-2 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs"><EditIcon className="h-3 w-3" />Edit</button>}
+                {canUpdate && <button type="button" onClick={() => { setEditing(role); setPermissionError(null); void loadPermissions() }} className="mr-2 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs"><EditIcon className="h-3 w-3" />Edit</button>}
                 {canDelete && !protectedRole && <button type="button" disabled={saving} onClick={() => void remove(role)} className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600"><DeleteIcon className="h-3 w-3" />Delete</button>}
               </td>
             </tr> })}

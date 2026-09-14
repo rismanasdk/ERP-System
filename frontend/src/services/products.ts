@@ -7,6 +7,7 @@ export const productsApi = {
     const q = [] as string[]
     if (filter?.search) q.push(`search=${encodeURIComponent(filter.search)}`)
     if (filter?.active !== undefined) q.push(`active=${filter.active}`)
+    if (filter?.category_id !== undefined) q.push(`category_id=${filter.category_id}`)
     const path = `/api/v1/products${q.length ? `?${q.join('&')}` : ''}`
     const res = await api.get<ApiEnvelope<Product[]>>(path, token)
     return res.data

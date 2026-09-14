@@ -335,7 +335,7 @@ func (r *Repository) CreatePurchaseItemWithTx(ctx context.Context, tx *sql.Tx, i
 func (r *Repository) GetPurchaseItemByID(ctx context.Context, id int64) (*PurchaseItem, error) {
 	item := &PurchaseItem{}
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, created_at, updated_at
+		SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, received_quantity, created_at, updated_at
         FROM purchase_items
         WHERE id = $1
     `, id).Scan(
@@ -345,6 +345,7 @@ func (r *Repository) GetPurchaseItemByID(ctx context.Context, id int64) (*Purcha
 		&item.Quantity,
 		&item.UnitCost,
 		&item.Subtotal,
+		&item.ReceivedQuantity,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	)
@@ -356,7 +357,7 @@ func (r *Repository) GetPurchaseItemByID(ctx context.Context, id int64) (*Purcha
 
 func (r *Repository) ListPurchaseItemsByPurchaseID(ctx context.Context, purchaseID int64) ([]PurchaseItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
-        SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, created_at, updated_at
+		SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, received_quantity, created_at, updated_at
         FROM purchase_items
         WHERE purchase_id = $1
         ORDER BY id ASC
@@ -376,6 +377,7 @@ func (r *Repository) ListPurchaseItemsByPurchaseID(ctx context.Context, purchase
 			&item.Quantity,
 			&item.UnitCost,
 			&item.Subtotal,
+			&item.ReceivedQuantity,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 		); err != nil {
@@ -449,6 +451,23 @@ func (r *Repository) ListPurchaseItemsByPurchaseIDWithTx(ctx context.Context, tx
 	return items, nil
 }
 
+func (r *Repository) ListPurchaseItemsForReceiveWithTx(ctx context.Context, tx *sql.Tx, purchaseID int64) ([]PurchaseItem, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id, purchase_id, product_id, quantity, unit_cost, subtotal, received_quantity, created_at, updated_at FROM purchase_items WHERE purchase_id = $1 ORDER BY id ASC FOR UPDATE`, purchaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PurchaseItem
+	for rows.Next() {
+		var item PurchaseItem
+		if err := rows.Scan(&item.ID, &item.PurchaseID, &item.ProductID, &item.Quantity, &item.UnitCost, &item.Subtotal, &item.ReceivedQuantity, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *Repository) UpdatePurchaseStatusWithTx(ctx context.Context, tx *sql.Tx, id int64, status string) error {
 	res, err := tx.ExecContext(ctx, `
         UPDATE purchases
@@ -466,4 +485,62 @@ func (r *Repository) UpdatePurchaseStatusWithTx(ctx context.Context, tx *sql.Tx,
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (r *Repository) CreateReceiptWithTx(ctx context.Context, tx *sql.Tx, receipt *PurchaseReceipt) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx, `
+        INSERT INTO purchase_receipts (purchase_order_id, branch_id, received_by, notes)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, received_at
+    `, receipt.PurchaseID, receipt.BranchID, receipt.ReceivedBy, receipt.Notes).Scan(&id, &receipt.ReceivedAt)
+	return id, err
+}
+
+func (r *Repository) CreateReceiptItemWithTx(ctx context.Context, tx *sql.Tx, item *PurchaseReceiptItem) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx, `
+        INSERT INTO purchase_receipt_items (purchase_receipt_id, purchase_order_item_id, product_id, quantity_received)
+        VALUES ($1, $2, $3, $4) RETURNING id
+    `, item.ReceiptID, item.PurchaseItemID, item.ProductID, item.QuantityReceived).Scan(&id)
+	return id, err
+}
+
+func (r *Repository) UpdatePurchaseItemReceivedWithTx(ctx context.Context, tx *sql.Tx, itemID, received int64) error {
+	_, err := tx.ExecContext(ctx, `UPDATE purchase_items SET received_quantity = $1, updated_at = NOW() WHERE id = $2`, received, itemID)
+	return err
+}
+
+func (r *Repository) ListReceipts(ctx context.Context, purchaseID int64) ([]PurchaseReceipt, error) {
+	rows, err := r.db.QueryContext(ctx, `
+        SELECT pr.id, pr.purchase_order_id, pr.branch_id, pr.received_by, COALESCE(u.name, ''), pr.received_at, pr.notes,
+               pri.id, pri.purchase_order_item_id, pri.product_id, pri.quantity_received
+        FROM purchase_receipts pr
+        LEFT JOIN users u ON u.id = pr.received_by
+        LEFT JOIN purchase_receipt_items pri ON pri.purchase_receipt_id = pr.id
+        WHERE pr.purchase_order_id = $1 ORDER BY pr.id ASC, pri.id ASC`, purchaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var receipts []PurchaseReceipt
+	byID := map[int64]*PurchaseReceipt{}
+	for rows.Next() {
+		var receipt PurchaseReceipt
+		var itemID, itemOrderID, itemProductID, itemQuantity sql.NullInt64
+		if err := rows.Scan(&receipt.ID, &receipt.PurchaseID, &receipt.BranchID, &receipt.ReceivedBy, &receipt.ReceivedByName, &receipt.ReceivedAt, &receipt.Notes, &itemID, &itemOrderID, &itemProductID, &itemQuantity); err != nil {
+			return nil, err
+		}
+		if existing, ok := byID[receipt.ID]; ok {
+			receipt = *existing
+		}
+		if itemID.Valid {
+			receipt.Items = append(receipt.Items, PurchaseReceiptItem{ID: itemID.Int64, ReceiptID: receipt.ID, PurchaseItemID: itemOrderID.Int64, ProductID: itemProductID.Int64, QuantityReceived: itemQuantity.Int64})
+		}
+		byID[receipt.ID] = &receipt
+	}
+	for _, receipt := range byID {
+		receipts = append(receipts, *receipt)
+	}
+	return receipts, rows.Err()
 }

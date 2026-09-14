@@ -1,5 +1,5 @@
 import type { ApiEnvelope } from '../types/auth'
-import type { Purchase, PurchaseFilter, CreatePurchaseInput } from '../types/purchase'
+import type { Purchase, PurchaseFilter, CreatePurchaseInput, PurchaseReceipt } from '../types/purchase'
 import { api } from '../lib/api'
 
 export const purchasesApi = {
@@ -33,5 +33,20 @@ export const purchasesApi = {
   cancel: async (id: number, token?: string): Promise<{ id: number; status: string }> => {
     const res = await api.post<ApiEnvelope<{ id: number; status: string }>>(`/api/v1/purchases/${id}/cancel`, undefined, token)
     return res.data
+  },
+
+  order: async (id: number, token?: string): Promise<{ id: number; status: string }> => {
+    const res = await api.post<ApiEnvelope<{ id: number; status: string }>>(`/api/v1/purchases/${id}/order`, undefined, token)
+    return res.data
+  },
+
+  receive: async (id: number, payload: { items: { purchase_order_item_id: number; quantity_received: number }[]; notes?: string }, token?: string): Promise<{ id: number }> => {
+    const res = await api.post<ApiEnvelope<{ id: number }>>(`/api/v1/purchases/${id}/receive`, payload, token)
+    return res.data
+  },
+
+  listReceipts: async (id: number, token?: string): Promise<PurchaseReceipt[]> => {
+    const res = await api.get<ApiEnvelope<PurchaseReceipt[]>>(`/api/v1/purchases/${id}/receipts`, token)
+    return res.data ?? []
   },
 }

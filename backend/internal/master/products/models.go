@@ -9,9 +9,11 @@ type Product struct {
 	Name          string     `json:"name"`
 	Description   *string    `json:"description,omitempty"`
 	Category      *string    `json:"category,omitempty"`
+	CategoryID    *int64     `json:"category_id,omitempty"`
 	Unit          *string    `json:"unit,omitempty"`
 	PurchasePrice float64    `json:"purchase_price"`
 	SellingPrice  float64    `json:"selling_price"`
+	MinimumStock  int64      `json:"minimum_stock"`
 	IsActive      bool       `json:"is_active"`
 	CreatedAt     time.Time  `json:"created_at,omitempty"`
 	UpdatedAt     time.Time  `json:"updated_at,omitempty"`
@@ -19,6 +21,7 @@ type Product struct {
 }
 
 type ProductFilter struct {
-	Search *string
-	Active *bool
+	Search     *string
+	Active     *bool
+	CategoryID *int64
 }

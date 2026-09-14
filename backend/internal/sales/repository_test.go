@@ -51,13 +51,13 @@ func TestSaleRepository_GetByID(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
         WHERE id = $1
     `)).
 		WithArgs(int64(11)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
-			int64(11), int64(1), "S-100", "DRAFT", float64(125.50), nil, int64(3), now, now,
+		WillReturnRows(sqlmock.NewRows([]string{"id", "customer_id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
+			int64(11), int64(0), int64(1), "S-100", "DRAFT", float64(125.50), nil, int64(3), now, now,
 		))
 
 	sale, err := repo.GetSaleByID(context.Background(), 11)
@@ -69,7 +69,7 @@ func TestSaleRepository_GetByID(t *testing.T) {
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
         WHERE id = $1
     `)).
@@ -96,14 +96,14 @@ func TestSaleRepository_GetByIDForUpdate(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
         WHERE id = $1
         FOR UPDATE
     `)).
 		WithArgs(int64(12)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
-			int64(12), int64(2), "S-200", "DRAFT", float64(300.00), nil, int64(4), now, now,
+		WillReturnRows(sqlmock.NewRows([]string{"id", "customer_id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
+			int64(12), int64(0), int64(2), "S-200", "DRAFT", float64(300.00), nil, int64(4), now, now,
 		))
 	mock.ExpectCommit()
 
@@ -140,13 +140,13 @@ func TestSaleRepository_GetByNumber(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
         WHERE sale_number = $1
     `)).
 		WithArgs("S-100").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
-			int64(13), int64(1), "S-100", "COMPLETED", float64(150.00), nil, int64(5), now, now,
+		WillReturnRows(sqlmock.NewRows([]string{"id", "customer_id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
+			int64(13), int64(0), int64(1), "S-100", "COMPLETED", float64(150.00), nil, int64(5), now, now,
 		))
 
 	sale, err := repo.GetSaleByNumber(context.Background(), "S-100")
@@ -158,7 +158,7 @@ func TestSaleRepository_GetByNumber(t *testing.T) {
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
         WHERE sale_number = $1
     `)).
@@ -186,12 +186,12 @@ func TestSaleRepository_List(t *testing.T) {
 	branchID := int64(2)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
  WHERE branch_id = $1 ORDER BY id ASC`)).
 		WithArgs(branchID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
-			int64(20), int64(2), "S-201", "DRAFT", float64(80.00), nil, int64(6), now, now,
+		WillReturnRows(sqlmock.NewRows([]string{"id", "customer_id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
+			int64(20), int64(0), int64(2), "S-201", "DRAFT", float64(80.00), nil, int64(6), now, now,
 		))
 
 	sales, err := repo.ListSales(context.Background(), SaleFilter{BranchID: &branchID})
@@ -203,13 +203,13 @@ func TestSaleRepository_List(t *testing.T) {
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
          ORDER BY id ASC`)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
-			int64(21), int64(1), "S-301", "COMPLETED", float64(100.00), nil, int64(7), now, now,
+		WillReturnRows(sqlmock.NewRows([]string{"id", "customer_id", "branch_id", "sale_number", "status", "total_amount", "notes", "created_by", "created_at", "updated_at"}).AddRow(
+			int64(21), int64(0), int64(1), "S-301", "COMPLETED", float64(100.00), nil, int64(7), now, now,
 		).AddRow(
-			int64(22), int64(2), "S-302", "DRAFT", float64(55.00), nil, int64(8), now, now,
+			int64(22), int64(0), int64(2), "S-302", "DRAFT", float64(55.00), nil, int64(8), now, now,
 		))
 
 	sales, err = repo.ListSales(context.Background(), SaleFilter{})
@@ -304,7 +304,7 @@ func TestSaleItemRepository_GetByID(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, sale_id, product_id, quantity, unit_price, subtotal, created_at, updated_at
+		SELECT id, sale_id, product_id, quantity, unit_price, subtotal, created_at, updated_at
         FROM sale_items
         WHERE id = $1
     `)).
@@ -349,16 +349,16 @@ func TestSaleItemRepository_ListBySaleID(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, sale_id, product_id, quantity, unit_price, subtotal, created_at, updated_at
+        SELECT id, sale_id, product_id, quantity, unit_price, subtotal, fulfilled_quantity, created_at, updated_at
         FROM sale_items
         WHERE sale_id = $1
         ORDER BY id ASC
     `)).
 		WithArgs(int64(11)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "sale_id", "product_id", "quantity", "unit_price", "subtotal", "created_at", "updated_at"}).AddRow(
-			int64(101), int64(11), int64(7), int64(2), float64(50.00), float64(100.00), now, now,
+		WillReturnRows(sqlmock.NewRows([]string{"id", "sale_id", "product_id", "quantity", "unit_price", "subtotal", "fulfilled_quantity", "created_at", "updated_at"}).AddRow(
+			int64(101), int64(11), int64(7), int64(2), float64(50.00), float64(100.00), int64(0), now, now,
 		).AddRow(
-			int64(102), int64(11), int64(8), int64(1), float64(60.00), float64(60.00), now, now,
+			int64(102), int64(11), int64(8), int64(1), float64(60.00), float64(60.00), int64(0), now, now,
 		))
 
 	items, err := repo.ListSaleItemsBySaleID(context.Background(), 11)

@@ -23,6 +23,55 @@ type SaleService interface {
 	GetSale(ctx context.Context, id int64) (*Sale, []SaleItem, error)
 	CompleteSale(ctx context.Context, saleID int64) error
 	CancelSale(ctx context.Context, saleID int64) error
+	ConfirmSale(ctx context.Context, saleID int64) error
+	FulfillSale(ctx context.Context, saleID int64, input FulfillSaleInput) (int64, error)
+	ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error)
+}
+
+func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
+	id, err := parseSaleID(r)
+	if err != nil {
+		h.handleServiceError(w, err, "invalid sale id")
+		return
+	}
+	if err = h.service.ConfirmSale(r.Context(), id); err != nil {
+		h.handleServiceError(w, err, "failed to confirm sale")
+		return
+	}
+	response.JSONOK(w, map[string]any{"id": id, "status": SaleStatusConfirmed})
+}
+
+func (h *Handler) Fulfill(w http.ResponseWriter, r *http.Request) {
+	id, err := parseSaleID(r)
+	if err != nil {
+		h.handleServiceError(w, err, "invalid sale id")
+		return
+	}
+	var input FulfillSaleInput
+	if err = json.NewDecoder(r.Body).Decode(&input); err != nil {
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid request body"))
+		return
+	}
+	fulfillmentID, err := h.service.FulfillSale(r.Context(), id, input)
+	if err != nil {
+		h.handleServiceError(w, err, "failed to fulfill sale")
+		return
+	}
+	response.JSONOK(w, map[string]int64{"id": fulfillmentID})
+}
+
+func (h *Handler) Fulfillments(w http.ResponseWriter, r *http.Request) {
+	id, err := parseSaleID(r)
+	if err != nil {
+		h.handleServiceError(w, err, "invalid sale id")
+		return
+	}
+	items, err := h.service.ListFulfillments(r.Context(), id)
+	if err != nil {
+		h.handleServiceError(w, err, "failed to list fulfillments")
+		return
+	}
+	response.JSONOK(w, items)
 }
 
 func NewHandler(service SaleService) *Handler {
@@ -167,6 +216,8 @@ func (h *Handler) handleServiceError(w http.ResponseWriter, err error, message s
 	case errors.Is(err, branches.ErrBranchInactive):
 		response.JSONError(w, http.StatusForbidden, response.NewAPIError(http.StatusForbidden, "FORBIDDEN", "branch is inactive"))
 	case errors.Is(err, ErrSaleAlreadyCompleted), errors.Is(err, ErrSaleAlreadyCancelled), errors.Is(err, ErrSaleHasNoItems), errors.Is(err, ErrInsufficientStock), errors.Is(err, ErrInvalidSaleTransition):
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
+	case errors.Is(err, ErrSaleNotConfirmed), errors.Is(err, ErrFulfillmentExceedsRemaining):
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	default:
 		var validationErr *ValidationError

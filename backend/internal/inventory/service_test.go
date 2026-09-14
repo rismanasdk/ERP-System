@@ -25,6 +25,9 @@ type fakeInventoryRepo struct {
 	listItems         []Inventory
 	listItemsByBranch map[int64][]Inventory
 	listErr           error
+	updatedQuantities map[int64]int64
+	movements         []StockMovement
+	transfer          *StockTransfer
 }
 
 func (r *fakeInventoryRepo) BeginTx(ctx context.Context) (*sql.Tx, error) {
@@ -78,7 +81,15 @@ func (r *fakeInventoryRepo) List(ctx context.Context, branchID, productID *int64
 	return nil, nil
 }
 
+func (r *fakeInventoryRepo) ListMovements(ctx context.Context, branchID, productID *int64) ([]StockMovement, error) {
+	return []StockMovement{{ID: 1, ProductID: 101, BranchID: 1, MovementType: MovementTypeIN, QuantityDelta: 5}}, nil
+}
+
 func (r *fakeInventoryRepo) UpdateQuantityWithTx(ctx context.Context, tx *sql.Tx, id, quantity int64) error {
+	if r.updatedQuantities == nil {
+		r.updatedQuantities = map[int64]int64{}
+	}
+	r.updatedQuantities[id] = quantity
 	return r.updateErr
 }
 
@@ -86,7 +97,29 @@ func (r *fakeInventoryRepo) CreateMovementWithTx(ctx context.Context, tx *sql.Tx
 	if r.movementErr != nil {
 		return 0, r.movementErr
 	}
+	r.movements = append(r.movements, *movement)
 	return 1, nil
+}
+
+func (r *fakeInventoryRepo) EnsureInventoryWithTx(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*Inventory, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	return &Inventory{ID: 2, ProductID: productID, BranchID: branchID}, nil
+}
+
+func (r *fakeInventoryRepo) CreateTransferWithTx(ctx context.Context, tx *sql.Tx, transfer *StockTransfer) (int64, error) {
+	transfer.ID = 1
+	r.transfer = transfer
+	return transfer.ID, nil
+}
+
+func (r *fakeInventoryRepo) ListTransfers(ctx context.Context, branchIDs []int64) ([]StockTransfer, error) {
+	return nil, nil
+}
+
+func (r *fakeInventoryRepo) GetTransfer(ctx context.Context, id int64) (*StockTransfer, error) {
+	return nil, sql.ErrNoRows
 }
 
 type fakeProductService struct {
@@ -174,6 +207,62 @@ func TestCreateInventory_Success(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCreateTransfer_MovesStockAndSharesReference(t *testing.T) {
+	service, repo, mock, cleanup := newServiceWithTx(t)
+	defer cleanup()
+
+	repo.getInventory = &Inventory{ID: 11, ProductID: 2, BranchID: 3, Quantity: 50}
+	service.productSvc = &fakeProductService{product: &products.Product{ID: 2, IsActive: true}}
+	service.branchSvc = &fakeBranchService{}
+	service.authChecker = &fakeAuthChecker{allowed: true}
+	service.auditSvc = &fakeAuditService{}
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	transferID, err := service.CreateTransfer(auth.ContextWithUserID(context.Background(), 10), CreateTransferInput{
+		SourceBranchID: 3, DestinationBranchID: 4, ProductID: 2, Quantity: 30,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if transferID != 1 || repo.transfer == nil || repo.transfer.Status != "COMPLETED" {
+		t.Fatalf("unexpected transfer: %+v", repo.transfer)
+	}
+	if repo.updatedQuantities[11] != 20 || repo.updatedQuantities[2] != 30 {
+		t.Fatalf("unexpected quantities: %+v", repo.updatedQuantities)
+	}
+	if len(repo.movements) != 2 || repo.movements[0].QuantityDelta != -30 || repo.movements[1].QuantityDelta != 30 {
+		t.Fatalf("unexpected movements: %+v", repo.movements)
+	}
+	if repo.movements[0].ReferenceID == nil || repo.movements[1].ReferenceID == nil || *repo.movements[0].ReferenceID != transferID || *repo.movements[1].ReferenceID != transferID {
+		t.Fatalf("movements do not share transfer reference: %+v", repo.movements)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCreateTransfer_RejectsSameBranchAndInsufficientStock(t *testing.T) {
+	service, repo, mock, cleanup := newServiceWithTx(t)
+	defer cleanup()
+	repo.getInventory = &Inventory{ID: 11, ProductID: 2, BranchID: 3, Quantity: 5}
+	service.productSvc = &fakeProductService{product: &products.Product{ID: 2, IsActive: true}}
+	service.branchSvc = &fakeBranchService{}
+	service.authChecker = &fakeAuthChecker{allowed: true}
+	ctx := auth.ContextWithUserID(context.Background(), 10)
+
+	_, err := service.CreateTransfer(ctx, CreateTransferInput{SourceBranchID: 3, DestinationBranchID: 3, ProductID: 2, Quantity: 1})
+	if !errors.Is(err, ErrSameTransferBranch) {
+		t.Fatalf("expected same branch error, got %v", err)
+	}
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+	_, err = service.CreateTransfer(ctx, CreateTransferInput{SourceBranchID: 3, DestinationBranchID: 4, ProductID: 2, Quantity: 6})
+	if !errors.Is(err, ErrInsufficientStock) {
+		t.Fatalf("expected insufficient stock error, got %v", err)
 	}
 }
 

@@ -4,6 +4,8 @@ import type { CreateSaleInput, CreateSaleItemInput } from '../../types/sale'
 import { branchesApi } from '../../services/branches'
 import { readStoredAccessToken } from '../../services/authSession'
 import { SaleItemEditor } from './SaleItemEditor'
+import { customersApi } from '../../services/customers'
+import type { Customer } from '../../types/customer'
 
 type Props = {
   submitting?: boolean
@@ -14,6 +16,8 @@ type Props = {
 
 export function CreateSaleForm({ submitting = false, onSubmit, onCancel, defaultBranchId }: Props) {
   const [branchId, setBranchId] = useState(String(defaultBranchId ?? ''))
+  const [customerId, setCustomerId] = useState('')
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<CreateSaleItemInput[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
@@ -29,13 +33,16 @@ export function CreateSaleForm({ submitting = false, onSubmit, onCancel, default
     }
   }, [token])
 
+  const loadCustomers = useCallback(async () => { try { setCustomers(await customersApi.list({ active: true }, token)) } catch { setCustomers([]) } }, [token])
+
   useEffect(() => {
     const id = window.setTimeout(() => {
       void loadBranches()
+      void loadCustomers()
     }, 0)
 
     return () => window.clearTimeout(id)
-  }, [loadBranches])
+  }, [loadBranches, loadCustomers])
 
   const addItem = useCallback(() => {
     setItems((s) => [...s, { product_id: 0, quantity: 1, unit_price: 0 }])
@@ -55,6 +62,7 @@ export function CreateSaleForm({ submitting = false, onSubmit, onCancel, default
     const e: Record<string, string> = {}
     const bid = Number(branchId)
     if (!Number.isFinite(bid) || bid <= 0) e.branch_id = 'Branch is required'
+    if (!Number.isFinite(Number(customerId)) || Number(customerId) <= 0) e.customer_id = 'Customer is required'
     if (items.length === 0) e.items = 'Add at least one item'
     setErrors(e)
     return Object.keys(e).length === 0
@@ -63,7 +71,7 @@ export function CreateSaleForm({ submitting = false, onSubmit, onCancel, default
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!validate()) return
-    await onSubmit({ branch_id: Number(branchId), notes: notes.trim() === '' ? undefined : notes.trim(), items })
+    await onSubmit({ branch_id: Number(branchId), customer_id: Number(customerId), notes: notes.trim() === '' ? undefined : notes.trim(), items })
   }
 
   return (
@@ -79,6 +87,7 @@ export function CreateSaleForm({ submitting = false, onSubmit, onCancel, default
           </select>
           {errors.branch_id ? <p className="mt-1 text-sm text-red-600">{errors.branch_id}</p> : null}
         </div>
+        <div><label htmlFor="sale-customer" className="block text-sm font-medium text-slate-700">Customer</label><select id="sale-customer" value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm"><option value="">-- Select customer --</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select>{errors.customer_id ? <p className="mt-1 text-sm text-red-600">{errors.customer_id}</p> : null}</div>
         <div className="md:col-span-2">
           <label htmlFor="sale-notes" className="block text-sm font-medium text-slate-700">Notes</label>
           <input id="sale-notes" value={notes} onChange={(e) => setNotes(e.target.value)} className="mt-1 block w-full rounded-md border-slate-200 shadow-sm" />

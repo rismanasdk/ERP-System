@@ -25,6 +25,7 @@ export {
   // Domain-specific
   LayoutDashboard as DashboardIcon,
   Package as ProductsIcon,
+  Tags as PackageIcon,
   Building2 as BranchIcon,
   UserRound as CustomersIcon,
   Truck as SuppliersIcon,

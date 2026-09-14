@@ -4,6 +4,8 @@ export type User = {
   name?: string
   roles?: string[]
   permissions?: string[]
+  branch_ids?: number[]
+  is_active?: boolean
   created_at?: string
   updated_at?: string
 }

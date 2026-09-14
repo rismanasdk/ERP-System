@@ -35,6 +35,13 @@ func (s *Service) Authenticate(ctx context.Context, email, passwordPlain string)
 	if err != nil {
 		return nil, nil, err
 	}
+	active, err := s.userRepo.GetActiveStatus(ctx, user.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !active {
+		return nil, nil, ErrInvalidCredentials
+	}
 	if err := password.Compare(user.PasswordHash, passwordPlain); err != nil {
 		return nil, nil, ErrInvalidCredentials
 	}
@@ -153,6 +160,13 @@ func (s *Service) RefreshAccessToken(ctx context.Context, rawRefreshToken string
 		return "", "", ErrInvalidRefreshToken
 	}
 	if refreshToken.ExpiresAt.Before(time.Now()) {
+		return "", "", ErrInvalidRefreshToken
+	}
+	active, err := s.userRepo.GetActiveStatus(ctx, refreshToken.UserID)
+	if err != nil {
+		return "", "", err
+	}
+	if !active {
 		return "", "", ErrInvalidRefreshToken
 	}
 

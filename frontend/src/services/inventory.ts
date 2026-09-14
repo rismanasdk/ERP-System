@@ -1,5 +1,5 @@
 import type { ApiEnvelope } from '../types/auth'
-import type { Inventory, InventoryFilter } from '../types/inventory'
+import type { Inventory, InventoryFilter, StockMovement, StockTransfer } from '../types/inventory'
 import { api } from '../lib/api'
 
 export const inventoryApi = {
@@ -11,6 +11,15 @@ export const inventoryApi = {
       const res = await api.get<ApiEnvelope<Inventory[]>>(path, token)
       return res.data ?? []
     },
+
+    listMovements: async (filter?: InventoryFilter, token?: string): Promise<StockMovement[]> => {
+        const q: string[] = []
+        if (filter?.branch_id !== undefined) q.push(`branch_id=${filter.branch_id}`)
+        if (filter?.product_id !== undefined) q.push(`product_id=${filter.product_id}`)
+        const path = `/api/v1/inventory/movements${q.length ? `?${q.join('&')}` : ''}`
+        const res = await api.get<ApiEnvelope<StockMovement[]>>(path, token)
+        return res.data ?? []
+      },
 
   getById: async (id: number, token?: string): Promise<Inventory> => {
     const res = await api.get<ApiEnvelope<Inventory>>(`/api/v1/inventory/${id}`, token)
@@ -28,6 +37,21 @@ export const inventoryApi = {
     token?: string,
   ): Promise<{ movement_id: number }> => {
     const res = await api.post<ApiEnvelope<{ movement_id: number }>>(`/api/v1/inventory/${inventoryId}/adjust`, payload, token)
+    return res.data
+  },
+
+  createTransfer: async (payload: { source_branch_id: number; destination_branch_id: number; product_id: number; quantity: number; notes?: string }, token?: string): Promise<{ id: number }> => {
+    const res = await api.post<ApiEnvelope<{ id: number }>>('/api/v1/inventory/transfers', payload, token)
+    return res.data
+  },
+
+  listTransfers: async (token?: string): Promise<StockTransfer[]> => {
+    const res = await api.get<ApiEnvelope<StockTransfer[]>>('/api/v1/inventory/transfers', token)
+    return res.data ?? []
+  },
+
+  getTransfer: async (id: number, token?: string): Promise<StockTransfer> => {
+    const res = await api.get<ApiEnvelope<StockTransfer>>(`/api/v1/inventory/transfers/${id}`, token)
     return res.data
   },
 }

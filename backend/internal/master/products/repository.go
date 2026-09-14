@@ -22,10 +22,10 @@ func (r *Repository) BeginTx(ctx context.Context) (*sql.Tx, error) {
 func (r *Repository) Create(ctx context.Context, product *Product) (int64, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx, `
-        INSERT INTO products (sku, barcode, name, description, category, unit, purchase_price, selling_price, is_active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO products (sku, barcode, name, description, category, category_id, unit, purchase_price, selling_price, minimum_stock, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id
-    `, product.SKU, product.Barcode, product.Name, product.Description, product.Category, product.Unit, product.PurchasePrice, product.SellingPrice, product.IsActive).Scan(&id)
+	`, product.SKU, product.Barcode, product.Name, product.Description, product.Category, product.CategoryID, product.Unit, product.PurchasePrice, product.SellingPrice, product.MinimumStock, product.IsActive).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -35,10 +35,10 @@ func (r *Repository) Create(ctx context.Context, product *Product) (int64, error
 func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, product *Product) (int64, error) {
 	var id int64
 	err := tx.QueryRowContext(ctx, `
-        INSERT INTO products (sku, barcode, name, description, category, unit, purchase_price, selling_price, is_active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO products (sku, barcode, name, description, category, category_id, unit, purchase_price, selling_price, minimum_stock, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id
-    `, product.SKU, product.Barcode, product.Name, product.Description, product.Category, product.Unit, product.PurchasePrice, product.SellingPrice, product.IsActive).Scan(&id)
+	`, product.SKU, product.Barcode, product.Name, product.Description, product.Category, product.CategoryID, product.Unit, product.PurchasePrice, product.SellingPrice, product.MinimumStock, product.IsActive).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -48,7 +48,7 @@ func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, product *Prod
 func (r *Repository) GetByID(ctx context.Context, id int64) (*Product, error) {
 	product := &Product{}
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, sku, barcode, name, description, category, unit, purchase_price, selling_price, is_active, created_at, updated_at, deleted_at
+		SELECT id, sku, barcode, name, description, category, category_id, unit, purchase_price, selling_price, minimum_stock, is_active, created_at, updated_at, deleted_at
         FROM products
         WHERE id = $1 AND deleted_at IS NULL
     `, id).Scan(
@@ -58,9 +58,11 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Product, error) {
 		&product.Name,
 		&product.Description,
 		&product.Category,
+		&product.CategoryID,
 		&product.Unit,
 		&product.PurchasePrice,
 		&product.SellingPrice,
+		&product.MinimumStock,
 		&product.IsActive,
 		&product.CreatedAt,
 		&product.UpdatedAt,
@@ -75,7 +77,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Product, error) {
 func (r *Repository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*Product, error) {
 	product := &Product{}
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, sku, barcode, name, description, category, unit, purchase_price, selling_price, is_active, created_at, updated_at, deleted_at
+		SELECT id, sku, barcode, name, description, category, category_id, unit, purchase_price, selling_price, minimum_stock, is_active, created_at, updated_at, deleted_at
         FROM products
         WHERE id = $1
     `, id).Scan(
@@ -85,9 +87,11 @@ func (r *Repository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*Prod
 		&product.Name,
 		&product.Description,
 		&product.Category,
+		&product.CategoryID,
 		&product.Unit,
 		&product.PurchasePrice,
 		&product.SellingPrice,
+		&product.MinimumStock,
 		&product.IsActive,
 		&product.CreatedAt,
 		&product.UpdatedAt,
@@ -113,7 +117,7 @@ func (r *Repository) getByColumn(ctx context.Context, column, value string) (*Pr
 	}
 
 	query := fmt.Sprintf(`
-        SELECT id, sku, barcode, name, description, category, unit, purchase_price, selling_price, is_active, created_at, updated_at, deleted_at
+		SELECT id, sku, barcode, name, description, category, category_id, unit, purchase_price, selling_price, minimum_stock, is_active, created_at, updated_at, deleted_at
         FROM products
         WHERE %s = $1
     `, column)
@@ -126,9 +130,11 @@ func (r *Repository) getByColumn(ctx context.Context, column, value string) (*Pr
 		&product.Name,
 		&product.Description,
 		&product.Category,
+		&product.CategoryID,
 		&product.Unit,
 		&product.PurchasePrice,
 		&product.SellingPrice,
+		&product.MinimumStock,
 		&product.IsActive,
 		&product.CreatedAt,
 		&product.UpdatedAt,
@@ -142,7 +148,7 @@ func (r *Repository) getByColumn(ctx context.Context, column, value string) (*Pr
 
 func (r *Repository) List(ctx context.Context, filter ProductFilter) ([]Product, error) {
 	query := `
-        SELECT id, sku, barcode, name, description, category, unit, purchase_price, selling_price, is_active, created_at, updated_at, deleted_at
+		SELECT id, sku, barcode, name, description, category, category_id, unit, purchase_price, selling_price, minimum_stock, is_active, created_at, updated_at, deleted_at
         FROM products
         WHERE deleted_at IS NULL
     `
@@ -159,6 +165,11 @@ func (r *Repository) List(ctx context.Context, filter ProductFilter) ([]Product,
 		clauses = append(clauses, fmt.Sprintf("(sku ILIKE $%d OR name ILIKE $%d)", idx, idx+1))
 		args = append(args, "%"+*filter.Search+"%", "%"+*filter.Search+"%")
 		idx += 2
+	}
+	if filter.CategoryID != nil {
+		clauses = append(clauses, fmt.Sprintf("category_id = $%d", idx))
+		args = append(args, *filter.CategoryID)
+		idx++
 	}
 
 	if len(clauses) > 0 {
@@ -182,9 +193,11 @@ func (r *Repository) List(ctx context.Context, filter ProductFilter) ([]Product,
 			&product.Name,
 			&product.Description,
 			&product.Category,
+			&product.CategoryID,
 			&product.Unit,
 			&product.PurchasePrice,
 			&product.SellingPrice,
+			&product.MinimumStock,
 			&product.IsActive,
 			&product.CreatedAt,
 			&product.UpdatedAt,
@@ -203,9 +216,9 @@ func (r *Repository) List(ctx context.Context, filter ProductFilter) ([]Product,
 func (r *Repository) Update(ctx context.Context, product *Product) error {
 	res, err := r.db.ExecContext(ctx, `
         UPDATE products
-        SET sku = $1, barcode = $2, name = $3, description = $4, category = $5, unit = $6, purchase_price = $7, selling_price = $8, is_active = $9, updated_at = NOW()
-        WHERE id = $10 AND deleted_at IS NULL
-    `, product.SKU, product.Barcode, product.Name, product.Description, product.Category, product.Unit, product.PurchasePrice, product.SellingPrice, product.IsActive, product.ID)
+		SET sku = $1, barcode = $2, name = $3, description = $4, category = $5, category_id = $6, unit = $7, purchase_price = $8, selling_price = $9, minimum_stock = $10, is_active = $11, updated_at = NOW()
+		WHERE id = $12 AND deleted_at IS NULL
+	`, product.SKU, product.Barcode, product.Name, product.Description, product.Category, product.CategoryID, product.Unit, product.PurchasePrice, product.SellingPrice, product.MinimumStock, product.IsActive, product.ID)
 	if err != nil {
 		return err
 	}
@@ -222,9 +235,9 @@ func (r *Repository) Update(ctx context.Context, product *Product) error {
 func (r *Repository) UpdateWithTx(ctx context.Context, tx *sql.Tx, product *Product) error {
 	res, err := tx.ExecContext(ctx, `
         UPDATE products
-        SET sku = $1, barcode = $2, name = $3, description = $4, category = $5, unit = $6, purchase_price = $7, selling_price = $8, is_active = $9, updated_at = NOW()
-        WHERE id = $10 AND deleted_at IS NULL
-    `, product.SKU, product.Barcode, product.Name, product.Description, product.Category, product.Unit, product.PurchasePrice, product.SellingPrice, product.IsActive, product.ID)
+		SET sku = $1, barcode = $2, name = $3, description = $4, category = $5, category_id = $6, unit = $7, purchase_price = $8, selling_price = $9, minimum_stock = $10, is_active = $11, updated_at = NOW()
+		WHERE id = $12 AND deleted_at IS NULL
+	`, product.SKU, product.Barcode, product.Name, product.Description, product.Category, product.CategoryID, product.Unit, product.PurchasePrice, product.SellingPrice, product.MinimumStock, product.IsActive, product.ID)
 	if err != nil {
 		return err
 	}

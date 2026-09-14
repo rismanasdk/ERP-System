@@ -73,6 +73,8 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 		}
 
 		ctx := context.WithValue(r.Context(), userIDContextKey, claims.UserID)
+		// Keep the legacy string context value for services that predate typed context keys.
+		ctx = context.WithValue(ctx, "userID", claims.UserID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

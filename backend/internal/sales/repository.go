@@ -20,6 +20,10 @@ type SaleRepository interface {
 	CreateSaleItemWithTx(ctx context.Context, tx *sql.Tx, item *SaleItem) (int64, error)
 	GetSaleItemByID(ctx context.Context, id int64) (*SaleItem, error)
 	ListSaleItemsBySaleID(ctx context.Context, saleID int64) ([]SaleItem, error)
+	CreateFulfillmentWithTx(ctx context.Context, tx *sql.Tx, fulfillment *SaleFulfillment) (int64, error)
+	CreateFulfillmentItemWithTx(ctx context.Context, tx *sql.Tx, item *SaleFulfillmentItem) (int64, error)
+	UpdateSaleItemFulfilledWithTx(ctx context.Context, tx *sql.Tx, itemID, fulfilled int64) error
+	ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error)
 }
 
 type Repository struct {
@@ -49,11 +53,20 @@ func (r *Repository) CreateSale(ctx context.Context, sale *Sale) (int64, error) 
 
 func (r *Repository) CreateSaleWithTx(ctx context.Context, tx *sql.Tx, sale *Sale) (int64, error) {
 	var id int64
-	err := tx.QueryRowContext(ctx, `
+	var row *sql.Row
+	if sale.CustomerID > 0 {
+		row = tx.QueryRowContext(ctx, `
+		INSERT INTO sales (customer_id, branch_id, sale_number, status, total_amount, notes, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+	`, sale.CustomerID, sale.BranchID, sale.SaleNumber, sale.Status, sale.TotalAmount, sale.Notes, sale.CreatedBy)
+	} else {
+		row = tx.QueryRowContext(ctx, `
         INSERT INTO sales (branch_id, sale_number, status, total_amount, notes, created_by)
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
-    `, sale.BranchID, sale.SaleNumber, sale.Status, sale.TotalAmount, sale.Notes, sale.CreatedBy).Scan(&id)
+	`, sale.BranchID, sale.SaleNumber, sale.Status, sale.TotalAmount, sale.Notes, sale.CreatedBy)
+	}
+	err := row.Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -63,11 +76,12 @@ func (r *Repository) CreateSaleWithTx(ctx context.Context, tx *sql.Tx, sale *Sal
 func (r *Repository) GetSaleByID(ctx context.Context, id int64) (*Sale, error) {
 	sale := &Sale{}
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
         WHERE id = $1
     `, id).Scan(
 		&sale.ID,
+		&sale.CustomerID,
 		&sale.BranchID,
 		&sale.SaleNumber,
 		&sale.Status,
@@ -86,12 +100,13 @@ func (r *Repository) GetSaleByID(ctx context.Context, id int64) (*Sale, error) {
 func (r *Repository) GetSaleByIDForUpdate(ctx context.Context, tx *sql.Tx, id int64) (*Sale, error) {
 	sale := &Sale{}
 	err := tx.QueryRowContext(ctx, `
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
         WHERE id = $1
         FOR UPDATE
     `, id).Scan(
 		&sale.ID,
+		&sale.CustomerID,
 		&sale.BranchID,
 		&sale.SaleNumber,
 		&sale.Status,
@@ -110,11 +125,12 @@ func (r *Repository) GetSaleByIDForUpdate(ctx context.Context, tx *sql.Tx, id in
 func (r *Repository) GetSaleByNumber(ctx context.Context, number string) (*Sale, error) {
 	sale := &Sale{}
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
         WHERE sale_number = $1
     `, strings.TrimSpace(number)).Scan(
 		&sale.ID,
+		&sale.CustomerID,
 		&sale.BranchID,
 		&sale.SaleNumber,
 		&sale.Status,
@@ -132,7 +148,7 @@ func (r *Repository) GetSaleByNumber(ctx context.Context, number string) (*Sale,
 
 func (r *Repository) ListSales(ctx context.Context, filter SaleFilter) ([]Sale, error) {
 	query := `
-        SELECT id, branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
+		SELECT id, COALESCE(customer_id, 0), branch_id, sale_number, status, total_amount, notes, created_by, created_at, updated_at
         FROM sales
     `
 	clauses := []string{}
@@ -161,6 +177,7 @@ func (r *Repository) ListSales(ctx context.Context, filter SaleFilter) ([]Sale, 
 		var sale Sale
 		if err := rows.Scan(
 			&sale.ID,
+			&sale.CustomerID,
 			&sale.BranchID,
 			&sale.SaleNumber,
 			&sale.Status,
@@ -268,7 +285,7 @@ func (r *Repository) GetSaleItemByID(ctx context.Context, id int64) (*SaleItem, 
 
 func (r *Repository) ListSaleItemsBySaleID(ctx context.Context, saleID int64) ([]SaleItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
-        SELECT id, sale_id, product_id, quantity, unit_price, subtotal, created_at, updated_at
+		SELECT id, sale_id, product_id, quantity, unit_price, subtotal, fulfilled_quantity, created_at, updated_at
         FROM sale_items
         WHERE sale_id = $1
         ORDER BY id ASC
@@ -288,6 +305,7 @@ func (r *Repository) ListSaleItemsBySaleID(ctx context.Context, saleID int64) ([
 			&item.Quantity,
 			&item.UnitPrice,
 			&item.Subtotal,
+			&item.FulfilledQuantity,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 		); err != nil {
@@ -303,7 +321,7 @@ func (r *Repository) ListSaleItemsBySaleID(ctx context.Context, saleID int64) ([
 
 func (r *Repository) ListSaleItemsBySaleIDWithTx(ctx context.Context, tx *sql.Tx, saleID int64) ([]SaleItem, error) {
 	rows, err := tx.QueryContext(ctx, `
-        SELECT id, sale_id, product_id, quantity, unit_price, subtotal, created_at, updated_at
+	SELECT id, sale_id, product_id, quantity, unit_price, subtotal, fulfilled_quantity, created_at, updated_at
         FROM sale_items
         WHERE sale_id = $1
         ORDER BY id ASC
@@ -323,6 +341,7 @@ func (r *Repository) ListSaleItemsBySaleIDWithTx(ctx context.Context, tx *sql.Tx
 			&item.Quantity,
 			&item.UnitPrice,
 			&item.Subtotal,
+			&item.FulfilledQuantity,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 		); err != nil {
@@ -334,4 +353,49 @@ func (r *Repository) ListSaleItemsBySaleIDWithTx(ctx context.Context, tx *sql.Tx
 		return nil, err
 	}
 	return items, nil
+}
+
+func (r *Repository) CreateFulfillmentWithTx(ctx context.Context, tx *sql.Tx, fulfillment *SaleFulfillment) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx, `INSERT INTO sales_fulfillments (sales_order_id, branch_id, fulfilled_by, notes) VALUES ($1, $2, $3, $4) RETURNING id, fulfilled_at`, fulfillment.SaleID, fulfillment.BranchID, fulfillment.FulfilledBy, fulfillment.Notes).Scan(&id, &fulfillment.FulfilledAt)
+	return id, err
+}
+
+func (r *Repository) CreateFulfillmentItemWithTx(ctx context.Context, tx *sql.Tx, item *SaleFulfillmentItem) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx, `INSERT INTO sales_fulfillment_items (sales_fulfillment_id, sales_order_item_id, product_id, quantity_fulfilled) VALUES ($1, $2, $3, $4) RETURNING id`, item.FulfillmentID, item.SaleItemID, item.ProductID, item.QuantityFulfilled).Scan(&id)
+	return id, err
+}
+
+func (r *Repository) UpdateSaleItemFulfilledWithTx(ctx context.Context, tx *sql.Tx, itemID, fulfilled int64) error {
+	_, err := tx.ExecContext(ctx, `UPDATE sale_items SET fulfilled_quantity = $1, updated_at = NOW() WHERE id = $2`, fulfilled, itemID)
+	return err
+}
+
+func (r *Repository) ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT sf.id, sf.sales_order_id, sf.branch_id, sf.fulfilled_by, COALESCE(u.name, ''), sf.fulfilled_at, sf.notes, sfi.id, sfi.sales_order_item_id, sfi.product_id, sfi.quantity_fulfilled FROM sales_fulfillments sf LEFT JOIN users u ON u.id = sf.fulfilled_by LEFT JOIN sales_fulfillment_items sfi ON sfi.sales_fulfillment_id = sf.id WHERE sf.sales_order_id = $1 ORDER BY sf.id ASC, sfi.id ASC`, saleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []SaleFulfillment{}
+	byID := map[int64]*SaleFulfillment{}
+	for rows.Next() {
+		var f SaleFulfillment
+		var itemID, saleItemID, productID, quantity sql.NullInt64
+		if err := rows.Scan(&f.ID, &f.SaleID, &f.BranchID, &f.FulfilledBy, &f.FulfilledByName, &f.FulfilledAt, &f.Notes, &itemID, &saleItemID, &productID, &quantity); err != nil {
+			return nil, err
+		}
+		if old := byID[f.ID]; old != nil {
+			f = *old
+		}
+		if itemID.Valid {
+			f.Items = append(f.Items, SaleFulfillmentItem{ID: itemID.Int64, FulfillmentID: f.ID, SaleItemID: saleItemID.Int64, ProductID: productID.Int64, QuantityFulfilled: quantity.Int64})
+		}
+		byID[f.ID] = &f
+	}
+	for _, f := range byID {
+		result = append(result, *f)
+	}
+	return result, rows.Err()
 }

@@ -34,9 +34,11 @@ type createProductRequest struct {
 	Name          string  `json:"name"`
 	Description   *string `json:"description,omitempty"`
 	Category      *string `json:"category,omitempty"`
+	CategoryID    *int64  `json:"category_id,omitempty"`
 	Unit          *string `json:"unit,omitempty"`
 	PurchasePrice float64 `json:"purchase_price"`
 	SellingPrice  float64 `json:"selling_price"`
+	MinimumStock  int64   `json:"minimum_stock"`
 	IsActive      *bool   `json:"is_active,omitempty"`
 }
 
@@ -61,8 +63,17 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		active = &parsed
 	}
+	var categoryID *int64
+	if raw := r.URL.Query().Get("category_id"); raw != "" {
+		parsed, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || parsed <= 0 {
+			response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid category_id"))
+			return
+		}
+		categoryID = &parsed
+	}
 
-	products, err := h.service.List(r.Context(), ProductFilter{Search: search, Active: active})
+	products, err := h.service.List(r.Context(), ProductFilter{Search: search, Active: active, CategoryID: categoryID})
 	if err != nil {
 		response.JSONError(w, http.StatusInternalServerError, response.NewAPIError(http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "failed to list products"))
 		return
@@ -98,9 +109,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Name:          req.Name,
 		Description:   req.Description,
 		Category:      req.Category,
+		CategoryID:    req.CategoryID,
 		Unit:          req.Unit,
 		PurchasePrice: req.PurchasePrice,
 		SellingPrice:  req.SellingPrice,
+		MinimumStock:  req.MinimumStock,
 		IsActive:      true,
 	}
 	if req.IsActive != nil {
@@ -141,9 +154,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Name:          req.Name,
 		Description:   req.Description,
 		Category:      req.Category,
+		CategoryID:    req.CategoryID,
 		Unit:          req.Unit,
 		PurchasePrice: req.PurchasePrice,
 		SellingPrice:  req.SellingPrice,
+		MinimumStock:  req.MinimumStock,
 		IsActive:      true,
 	}
 	if req.IsActive != nil {

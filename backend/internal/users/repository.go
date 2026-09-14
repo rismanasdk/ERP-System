@@ -21,10 +21,10 @@ func (r *Repository) BeginTx(ctx context.Context) (*sql.Tx, error) {
 func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, user *User) (int64, error) {
 	var id int64
 	err := tx.QueryRowContext(ctx, `
-        INSERT INTO users (email, password_hash, name)
-        VALUES ($1, $2, $3)
+		INSERT INTO users (email, password_hash, name)
+		VALUES ($1, $2, $3)
         RETURNING id
-    `, user.Email, user.PasswordHash, user.Name).Scan(&id)
+	`, user.Email, user.PasswordHash, user.Name).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -34,9 +34,9 @@ func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, user *User) (
 func (r *Repository) UpdateWithTx(ctx context.Context, tx *sql.Tx, user *User) error {
 	res, err := tx.ExecContext(ctx, `
         UPDATE users
-        SET email = $1, password_hash = $2, name = $3, updated_at = NOW()
-        WHERE id = $4
-    `, user.Email, user.PasswordHash, user.Name, user.ID)
+		SET email = $1, password_hash = $2, name = $3, updated_at = NOW()
+		WHERE id = $4
+	`, user.Email, user.PasswordHash, user.Name, user.ID)
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func (r *Repository) DeleteBranchesWithTx(ctx context.Context, tx *sql.Tx, userI
 func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
 	user := &User{}
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, created_at, updated_at
         FROM users
         WHERE email = $1
     `, email).Scan(
@@ -101,7 +101,7 @@ func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error
 func (r *Repository) GetByID(ctx context.Context, id int64) (*User, error) {
 	user := &User{}
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, created_at, updated_at
         FROM users
         WHERE id = $1
     `, id).Scan(
@@ -121,10 +121,10 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*User, error) {
 func (r *Repository) Create(ctx context.Context, user *User) (int64, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx, `
-        INSERT INTO users (email, password_hash, name)
-        VALUES ($1, $2, $3)
+		INSERT INTO users (email, password_hash, name)
+		VALUES ($1, $2, $3)
         RETURNING id
-    `, user.Email, user.PasswordHash, user.Name).Scan(&id)
+	`, user.Email, user.PasswordHash, user.Name).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -133,10 +133,10 @@ func (r *Repository) Create(ctx context.Context, user *User) (int64, error) {
 
 func (r *Repository) List(ctx context.Context, filter UserFilter) ([]User, error) {
 	query := `
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, created_at, updated_at
         FROM users
     `
-	args := []any{}
+	args := []interface{}{}
 	clauses := []string{}
 	if filter.Search != nil {
 		pattern := fmt.Sprintf("%%%s%%", *filter.Search)
@@ -177,7 +177,7 @@ func (r *Repository) List(ctx context.Context, filter UserFilter) ([]User, error
 
 func (r *Repository) ListByBranch(ctx context.Context, branchID int64) ([]User, error) {
 	rows, err := r.db.QueryContext(ctx, `
-        SELECT u.id, u.email, u.password_hash, u.name, u.created_at, u.updated_at
+		SELECT u.id, u.email, u.password_hash, u.name, u.created_at, u.updated_at
         FROM users u
         JOIN user_branches ub ON ub.user_id = u.id
         WHERE ub.branch_id = $1
@@ -207,6 +207,52 @@ func (r *Repository) ListByBranch(ctx context.Context, branchID int64) ([]User, 
 		return nil, err
 	}
 	return users, nil
+}
+
+func (r *Repository) ListAccessible(ctx context.Context, filter UserFilter, actorID int64) ([]User, error) {
+	query := `
+		SELECT DISTINCT u.id, u.email, u.password_hash, u.name, u.is_active, u.created_at, u.updated_at
+		FROM users u
+		JOIN user_branches ub ON ub.user_id = u.id
+		JOIN user_branches actor_branch ON actor_branch.branch_id = ub.branch_id AND actor_branch.user_id = $1
+	`
+	args := []any{actorID}
+	if filter.Search != nil {
+		query += ` WHERE (LOWER(u.email) LIKE LOWER($2) OR LOWER(u.name) LIKE LOWER($2))`
+		args = append(args, fmt.Sprintf("%%%s%%", *filter.Search))
+	}
+	query += ` ORDER BY u.created_at DESC`
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		var user User
+		if err := rows.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.CreatedAt, &user.UpdatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (r *Repository) HasBranchAccess(ctx context.Context, userID, branchID int64) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM user_branches WHERE user_id = $1 AND branch_id = $2)`, userID, branchID).Scan(&exists)
+	return exists, err
+}
+
+func (r *Repository) GetActiveStatus(ctx context.Context, userID int64) (bool, error) {
+	var active bool
+	err := r.db.QueryRowContext(ctx, `SELECT is_active FROM users WHERE id = $1`, userID).Scan(&active)
+	return active, err
+}
+
+func (r *Repository) SetActiveStatus(ctx context.Context, userID int64, active bool) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2`, active, userID)
+	return err
 }
 
 func (r *Repository) GetRoleNames(ctx context.Context, userID int64) ([]string, error) {
