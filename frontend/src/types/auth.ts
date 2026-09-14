@@ -11,11 +11,15 @@ export type User = {
 export type Role = {
   id?: number
   name?: string
+  description?: string
+  permissions?: string[]
+  user_count?: number
 }
 
 export type Permission = {
   id?: number
   name?: string
+  description?: string
 }
 
 export type Branch = {

@@ -84,7 +84,7 @@ describe('PurchasesPage', () => {
   })
 
   it('allows creating a purchase', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['purchases.create'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['purchases.create', 'purchases.read'] }))
 
     const listMock = purchasesApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([])
@@ -149,7 +149,7 @@ describe('PurchasesPage', () => {
   })
 
   it('asks for confirmation before completing a purchase', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['purchases.complete'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['purchases.complete', 'purchases.read'] }))
 
     const listMock = purchasesApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([

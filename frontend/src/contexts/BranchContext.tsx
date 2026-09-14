@@ -34,6 +34,9 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // TODO: replace role-based All Branches detection with explicit
+  // backend-provided branch scope when branch scope contract exists.
+  // For now preserve existing behavior to avoid backend changes.
   const isSuperAdmin = Boolean(user?.roles?.includes('SUPER_ADMIN'))
   const isAllBranches = !selectedBranch || (isSuperAdmin && selectedBranch.id === -1)
 

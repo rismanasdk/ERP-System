@@ -72,7 +72,7 @@ describe('SalesPage', () => {
   })
 
   it('allows creating a sale', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['sales.create'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['sales.create', 'sales.read'] }))
 
     let salesRows: Array<{
       id: number
@@ -139,7 +139,7 @@ describe('SalesPage', () => {
   })
 
   it('asks for confirmation before completing a sale', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['sales.complete'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['sales.complete', 'sales.read'] }))
 
     let salesRows: Array<{
       id: number

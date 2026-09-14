@@ -28,11 +28,10 @@ export function CustomersPage() {
   const token = readStoredAccessToken() ?? undefined
   const rows = useMemo(() => customers, [customers])
 
-  const isSuperAdmin = user?.roles?.includes('SUPER_ADMIN')
-  const canRead = isSuperAdmin || user?.permissions?.includes('customers.read')
-  const canCreate = isSuperAdmin || user?.permissions?.includes('customers.create')
-  const canUpdate = isSuperAdmin || user?.permissions?.includes('customers.update')
-  const canDelete = isSuperAdmin || user?.permissions?.includes('customers.delete')
+  const canRead = user ? Boolean(user?.permissions?.includes('customers.read')) : true
+  const canCreate = user?.permissions?.includes('customers.create')
+  const canUpdate = user?.permissions?.includes('customers.update')
+  const canDelete = user?.permissions?.includes('customers.delete')
 
   const load = useCallback(async () => {
     setIsLoading(true)
@@ -60,13 +59,18 @@ export function CustomersPage() {
     let active = true
     const run = async () => {
       if (!active) return
+      if (!canRead) {
+        setIsLoading(false)
+        setError(null)
+        return
+      }
       await load()
     }
     void run()
     return () => {
       active = false
     }
-  }, [load])
+  }, [load, canRead])
 
   const handleView = useCallback(async (id: number) => {
     try {
@@ -129,6 +133,14 @@ export function CustomersPage() {
       setSubmitting(false)
     }
   }, [confirmDialog, load, token])
+
+  if (!canRead) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">
+        You do not have permission to view customers.
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">

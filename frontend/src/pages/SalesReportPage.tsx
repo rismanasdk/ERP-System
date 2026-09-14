@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useBranch } from '../contexts/BranchContext'
+import { useAuth } from '../hooks/useAuth'
 import { branchesApi } from '../services/branches'
 import { salesReportsApi } from '../services/reports'
 import { readStoredAccessToken } from '../services/authSession'
@@ -49,6 +50,8 @@ function LoadingCard() {
 }
 
 export function SalesReportPage() {
+  const { user } = useAuth()
+  const canRead = user ? Boolean(user?.permissions?.includes('reports.read')) : true
   const { selectedBranch, isAllBranches } = useBranch()
   const token = readStoredAccessToken() ?? undefined
   const defaultRange = useMemo(() => getDefaultRange(), [])
@@ -116,10 +119,11 @@ export function SalesReportPage() {
 
   useEffect(() => {
     void (async () => {
+      if (!canRead) return
       await loadBranches()
       await loadReport(defaultRange)
     })()
-  }, [defaultRange, loadBranches, loadReport])
+  }, [defaultRange, loadBranches, loadReport, canRead])
 
   const summaryCards = useMemo(() => [
     {
@@ -140,6 +144,12 @@ export function SalesReportPage() {
   ], [report])
 
   const dailyRows = report?.daily_summary ?? []
+
+  if (!canRead) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">You do not have access to sales reports.</div>
+    )
+  }
 
   return (
     <div className="space-y-6">

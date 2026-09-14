@@ -82,6 +82,18 @@ describe('UsersPage', () => {
     expect(screen.getByText('Ani')).toBeInTheDocument()
   })
 
+  it('shows Create button only when users.create permission exists', async () => {
+    renderUsersPage({
+      id: 1,
+      email: 'admin@example.com',
+      name: 'Creator',
+      roles: ['ADMIN'],
+      permissions: ['users.create', 'users.read'],
+    })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /create/i })).toBeInTheDocument())
+  })
+
   it('blocks access when the user lacks users.read permission', async () => {
     renderUsersPage({
       id: 7,

@@ -18,7 +18,7 @@ import { formatDate, formatDateTime } from '../utils/dateUtils'
 
 export function PurchasesPage() {
   const { user } = useAuth()
-  const { selectedBranch, isAllBranches } = useBranch()
+  useBranch()
   const confirmDialog = useConfirm()
   const [items, setItems] = useState<Purchase[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -32,7 +32,7 @@ export function PurchasesPage() {
 
   const token = readStoredAccessToken() ?? undefined
   const rows = useMemo(() => items ?? [], [items])
-  const { page, totalPages, pageItems, goToPage, resetPage } = usePagination(rows, 10)
+  const { page, totalPages, pageItems, goToPage } = usePagination(rows, 10)
   const branchMapRef = useRef(branchMap)
   const supplierMapRef = useRef(supplierMap)
 
@@ -80,44 +80,34 @@ export function PurchasesPage() {
     setSupplierMap((current) => ({ ...current, ...Object.fromEntries(entries) }))
   }, [token])
 
+  const canRead = user ? Boolean(user?.permissions?.includes('purchases.read')) : true
+
   const load = useCallback(async () => {
+    if (!canRead) {
+      setIsLoading(false)
+      setError(null)
+      return
+    }
+
     setIsLoading(true)
     setError(null)
     try {
-      const payload = selectedBranch && selectedBranch.id > 0 && !isAllBranches
-        ? { branch_id: selectedBranch.id }
-        : filter.branch_id ? { branch_id: Number(filter.branch_id) } : undefined
-      const res = await purchasesApi.list(payload, token)
-      setItems(res)
-      resetPage()
-
-      const branchIds = Array.from(new Set(res.map((r) => r.branch_id))).filter(Boolean) as number[]
-      const supplierIds = Array.from(new Set(res.map((r) => r.supplier_id))).filter(Boolean) as number[]
-      await Promise.all([fetchMissingBranches(branchIds), fetchMissingSuppliers(supplierIds)])
+      const list = await purchasesApi.list({ branch_id: filter.branch_id ? Number(filter.branch_id) : undefined }, token)
+      const data = (list ?? []) as Purchase[]
+      setItems(data)
+      await fetchMissingBranches([...new Set(data.map((d) => d.branch_id))])
+      await fetchMissingSuppliers([...new Set(data.map((d) => d.supplier_id))])
     } catch (err) {
       const e = err as ApiError
-      if (e instanceof ApiError) {
-        if (e.status === 401) return setError('Session expired. Please sign in again.')
-        if (e.status === 403) return setError('You do not have access to purchases.')
-        return setError(e.message)
+      if (e.status === 403) {
+        setError('You do not have access to purchases.')
+      } else {
+        setError(e.message)
       }
-      setError('Unable to load purchases')
     } finally {
       setIsLoading(false)
     }
-  }, [fetchMissingBranches, fetchMissingSuppliers, filter.branch_id, resetPage, selectedBranch, isAllBranches, token])
-
-  useEffect(() => {
-    let active = true
-    const run = async () => {
-      if (!active) return
-      await load()
-    }
-    void run()
-    return () => {
-      active = false
-    }
-  }, [load])
+  }, [canRead, token, filter.branch_id, fetchMissingBranches, fetchMissingSuppliers])
 
   const onCreate = useCallback(async (payload: CreatePurchaseInput) => {
     setSubmitting(true)
@@ -153,7 +143,7 @@ export function PurchasesPage() {
       setSubmitting(false)
     }
   }, [confirmDialog, load, token])
-
+  
   const onCancel = useCallback(async (id: number) => {
     const ok = await confirmDialog({
       title: 'Cancel this purchase?',
@@ -176,10 +166,21 @@ export function PurchasesPage() {
     }
   }, [confirmDialog, load, token])
 
-  const isSuperAdmin = user?.roles?.includes('SUPER_ADMIN')
-  const canCreate = isSuperAdmin || user?.permissions?.includes('purchases.create')
-  const canComplete = isSuperAdmin || user?.permissions?.includes('purchases.complete')
-  const canCancel = isSuperAdmin || user?.permissions?.includes('purchases.cancel')
+  useEffect(() => {
+    let active = true
+    const run = async () => {
+      if (!active) return
+      await load()
+    }
+    void run()
+    return () => {
+      active = false
+    }
+  }, [load])
+
+  const canCreate = user?.permissions?.includes('purchases.create')
+  const canComplete = user?.permissions?.includes('purchases.complete')
+  const canCancel = user?.permissions?.includes('purchases.cancel')
 
   return (
     <div className="space-y-6">

@@ -16,6 +16,7 @@ import { SalesPage } from '../pages/SalesPage'
 import { SalesReportPage } from '../pages/SalesReportPage'
 import { OrganizationPage } from '../pages/OrganizationPage'
 import { UsersPage } from '../pages/UsersPage'
+import { RolesPage } from '../pages/RolesPage'
 import { ConfirmDialogProvider } from '../utils/confirmUtils'
 import { BranchProvider } from '../contexts/BranchContext'
 
@@ -38,6 +39,7 @@ function AppRoutes() {
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/organization" element={<OrganizationPage />} />
         <Route path="/users" element={<UsersPage />} />
+          <Route path="/roles" element={<RolesPage />} />
         <Route path="/branches" element={<BranchesPage />} />
         <Route path="/branch" element={<BranchesPage />} />
         <Route path="/customers" element={<CustomersPage />} />
@@ -49,6 +51,7 @@ function AppRoutes() {
         <Route path="/app/products" element={<ProductsPage />} />
         <Route path="/app/organization" element={<OrganizationPage />} />
         <Route path="/app/users" element={<UsersPage />} />
+          <Route path="/app/roles" element={<RolesPage />} />
         <Route path="/app/branches" element={<BranchesPage />} />
         <Route path="/app/branch" element={<BranchesPage />} />
         <Route path="/app/customers" element={<CustomersPage />} />

@@ -135,6 +135,17 @@ func main() {
 	router.Handle("/api/v1/roles", authMiddleware.Authenticate(authMiddleware.RequirePermission("roles.read")(http.HandlerFunc(roleHandler.List)))).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/roles", corsPreflightHandler).Methods(http.MethodOptions)
 	router.Handle("/api/v1/roles/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("roles.read")(http.HandlerFunc(roleHandler.Get)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/roles", authMiddleware.Authenticate(authMiddleware.RequirePermission("roles.create")(http.HandlerFunc(roleHandler.Create)))).Methods(http.MethodPost)
+	router.Handle("/api/v1/roles/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("roles.update")(http.HandlerFunc(roleHandler.Update)))).Methods(http.MethodPut)
+	router.Handle("/api/v1/roles/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("roles.delete")(http.HandlerFunc(roleHandler.Delete)))).Methods(http.MethodDelete)
+	router.Handle("/api/v1/permissions", authMiddleware.Authenticate(authMiddleware.RequirePermission("permissions.read")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		items, err := permRepo.List(r.Context())
+		if err != nil {
+			response.JSONError(w, http.StatusInternalServerError, response.NewAPIError(http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "failed to list permissions"))
+			return
+		}
+		response.JSONOK(w, items)
+	})))).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/roles/{id}", corsPreflightHandler).Methods(http.MethodOptions)
 	router.Handle("/api/v1/branches", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.read")(http.HandlerFunc(branchHandler.List)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/branches/{id}", authMiddleware.Authenticate(authMiddleware.RequirePermission("inventory.read")(http.HandlerFunc(branchHandler.Get)))).Methods(http.MethodGet)

@@ -53,7 +53,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, _, err := h.authService.Authenticate(r.Context(), req.Email, req.Password)
+	user, perms, err := h.authService.Authenticate(r.Context(), req.Email, req.Password)
 	if err != nil {
 		response.JSONError(w, http.StatusUnauthorized, response.NewAPIError(http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid credentials"))
 		return
@@ -71,7 +71,20 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response.JSONOK(w, LoginResponse{AccessToken: token, RefreshToken: refreshToken, User: user})
+	// Build a response-level user DTO that includes permissions without
+	// mutating the persistent users.User model.
+	respUser := map[string]any{
+		"id":          user.ID,
+		"email":       user.Email,
+		"name":        user.Name,
+		"roles":       user.RoleNames,
+		"branch_ids":  user.BranchIDs,
+		"created_at":  user.CreatedAt,
+		"updated_at":  user.UpdatedAt,
+		"permissions": perms,
+	}
+
+	response.JSONOK(w, LoginResponse{AccessToken: token, RefreshToken: refreshToken, User: respUser})
 }
 
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
