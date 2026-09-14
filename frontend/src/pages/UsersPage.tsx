@@ -170,11 +170,11 @@ export function UsersPage() {
     }
   }, [confirm, load, token])
 
-  const isSuperAdmin = Boolean(user?.roles?.includes('SUPER_ADMIN'))
-  const canRead = isSuperAdmin || Boolean(user?.permissions?.includes('users.read'))
-  const canCreate = isSuperAdmin || Boolean(user?.permissions?.includes('users.create'))
-  const canUpdate = isSuperAdmin || Boolean(user?.permissions?.includes('users.update'))
-  const canDelete = isSuperAdmin || Boolean(user?.permissions?.includes('users.delete'))
+  // Authorization must be permission-driven. Do not use role-name bypasses.
+  const canRead = Boolean(user?.permissions?.includes('users.read'))
+  const canCreate = Boolean(user?.permissions?.includes('users.create'))
+  const canUpdate = Boolean(user?.permissions?.includes('users.update'))
+  const canDelete = Boolean(user?.permissions?.includes('users.delete'))
 
   if (!canRead) {
     return (

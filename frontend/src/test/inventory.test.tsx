@@ -36,6 +36,7 @@ afterEach(() => {
 
 describe('InventoryPage', () => {
   it('renders loading and then list', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['inventory.read'] }))
     const fake = [{ id: 1, product_id: 10, branch_id: 2, quantity: 5, created_at: '2020-01-01' }]
     const listMock = inventoryApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([])
@@ -58,6 +59,7 @@ describe('InventoryPage', () => {
   })
 
   it('shows empty state', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['inventory.read'] }))
     const listMock = inventoryApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([])
     listMock.mockResolvedValueOnce([])
@@ -74,6 +76,7 @@ describe('InventoryPage', () => {
   })
 
   it('shows API error when list fails with 403', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['inventory.read'] }))
     const err = new ApiError(403, 'forbidden', 'FORBIDDEN')
     const listMock = inventoryApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([])
@@ -91,7 +94,7 @@ describe('InventoryPage', () => {
   })
 
   it('allows creating inventory successfully', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['inventory.create'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['inventory.create', 'inventory.read'] }))
     const newItem = { id: 2, product_id: 20, branch_id: 3, quantity: 10 }
     const listMock = inventoryApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([])
@@ -126,7 +129,7 @@ describe('InventoryPage', () => {
   })
 
   it('allows adjusting inventory', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['inventory.adjust'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['inventory.adjust', 'inventory.read'] }))
     const existing = { id: 3, product_id: 30, branch_id: 1, quantity: 2 }
     const listMock = inventoryApi.list as unknown as ReturnType<typeof vi.fn>
     // return the existing item for all initial calls

@@ -39,6 +39,7 @@ function renderCustomersPage() {
 
 describe('CustomersPage', () => {
   it('renders customer list', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([{ id: 1, code: 'C001', name: 'ACME', is_active: true }])
 
@@ -49,6 +50,7 @@ describe('CustomersPage', () => {
   })
 
   it('shows loading state', () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockReturnValue(new Promise(() => {}))
 
@@ -58,6 +60,7 @@ describe('CustomersPage', () => {
   })
 
   it('shows empty state', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([])
 
@@ -118,7 +121,7 @@ describe('CustomersPage', () => {
   })
 
   it('allows creating a customer successfully', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create', 'customers.read'] }))
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([])
 
@@ -140,7 +143,7 @@ describe('CustomersPage', () => {
   })
 
   it('validates required code and name', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create', 'customers.read'] }))
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([])
 
@@ -157,7 +160,7 @@ describe('CustomersPage', () => {
   })
 
   it('allows updating a customer', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.update'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.update', 'customers.read'] }))
     const existing = { id: 3, code: 'C003', name: 'OldName', is_active: true }
 
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
@@ -182,7 +185,7 @@ describe('CustomersPage', () => {
   })
 
   it('soft-deletes by deactivating an active customer', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.delete'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.delete', 'customers.read'] }))
     const existing = { id: 5, code: 'C005', name: 'ToDelete', is_active: true }
 
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
@@ -204,7 +207,7 @@ describe('CustomersPage', () => {
   })
 
   it('hides deactivate button for inactive customer', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.delete'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.delete', 'customers.read'] }))
     const existing = { id: 6, code: 'C006', name: 'InactiveCustomer', is_active: false }
 
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
@@ -217,6 +220,7 @@ describe('CustomersPage', () => {
   })
 
   it('shows session expired state', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
     const err = new ApiError(401, 'Session expired', 'UNAUTHORIZED')
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockRejectedValueOnce(err)
@@ -227,6 +231,7 @@ describe('CustomersPage', () => {
   })
 
   it('shows permission denied state', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
     const err = new ApiError(403, 'forbidden', 'FORBIDDEN')
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockRejectedValueOnce(err)
@@ -237,7 +242,7 @@ describe('CustomersPage', () => {
   })
 
   it('shows duplicate-code API error', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.create', 'customers.read'] }))
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([])
 
@@ -256,6 +261,7 @@ describe('CustomersPage', () => {
   })
 
   it('shows generic API error', async () => {
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
     const err = new ApiError(500, 'Server error', 'INTERNAL_SERVER_ERROR')
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockRejectedValueOnce(err)
@@ -266,7 +272,7 @@ describe('CustomersPage', () => {
   })
 
   it('hides create, edit, and deactivate when permissions are absent', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: [] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['customers.read'] }))
     const listMock = customersApi.list as ReturnType<typeof vi.fn>
     listMock.mockResolvedValue([{ id: 1, code: 'C001', name: 'ACME', is_active: true }])
 

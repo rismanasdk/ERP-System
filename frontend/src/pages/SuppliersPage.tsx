@@ -50,17 +50,24 @@ export function SuppliersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, token])
 
+  const canRead = user ? Boolean(user?.permissions?.includes('suppliers.read')) : true
+
   useEffect(() => {
     let active = true
     const run = async () => {
       if (!active) return
+      if (!canRead) {
+        setIsLoading(false)
+        setError(null)
+        return
+      }
       await load()
     }
     void run()
     return () => {
       active = false
     }
-  }, [load])
+  }, [load, canRead])
 
   const onCreate = useCallback(async (payload: Partial<Supplier>) => {
     setSubmitting(true)
@@ -114,11 +121,15 @@ export function SuppliersPage() {
     }
   }, [confirmDialog, load, token])
 
-  const isSuperAdmin = user?.roles?.includes('SUPER_ADMIN')
-  const canCreate = isSuperAdmin || user?.permissions?.includes('suppliers.create')
-  const canUpdate = isSuperAdmin || user?.permissions?.includes('suppliers.update')
-  const canDelete = isSuperAdmin || user?.permissions?.includes('suppliers.delete')
+  const canCreate = user?.permissions?.includes('suppliers.create')
+  const canUpdate = user?.permissions?.includes('suppliers.update')
+  const canDelete = user?.permissions?.includes('suppliers.delete')
 
+  if (!canRead) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">You do not have permission to view suppliers.</div>
+    )
+  }
 
   return (
     <div className="space-y-6">

@@ -25,10 +25,9 @@ export function BranchesPage() {
   const token = readStoredAccessToken() ?? undefined
   const rows = useMemo(() => branches, [branches])
 
-  const isSuperAdmin = user?.roles?.includes('SUPER_ADMIN')
-  const canRead = isSuperAdmin || user?.permissions?.includes('inventory.read')
-  const canCreate = isSuperAdmin || user?.permissions?.includes('inventory.create')
-  const canUpdate = isSuperAdmin || user?.permissions?.includes('inventory.adjust')
+  const canRead = user?.permissions?.includes('inventory.read')
+  const canCreate = user?.permissions?.includes('inventory.create')
+  const canUpdate = user?.permissions?.includes('inventory.adjust')
 
   const load = useCallback(async () => {
     setIsLoading(true)

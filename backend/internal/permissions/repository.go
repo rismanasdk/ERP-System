@@ -28,3 +28,25 @@ func (r *Repository) GetByName(ctx context.Context, name string) (*Permission, e
 	}
 	return perm, nil
 }
+
+func (r *Repository) List(ctx context.Context) ([]Permission, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name, description
+		FROM permissions
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var permissions []Permission
+	for rows.Next() {
+		var permission Permission
+		if err := rows.Scan(&permission.ID, &permission.Name, &permission.Description); err != nil {
+			return nil, err
+		}
+		permissions = append(permissions, permission)
+	}
+	return permissions, rows.Err()
+}

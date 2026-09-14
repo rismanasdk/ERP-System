@@ -103,19 +103,6 @@ export function InventoryPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, token, fetchMissingProducts, fetchMissingBranches, selectedBranch, isAllBranches])
-
-  useEffect(() => {
-    let active = true
-    const run = async () => {
-      if (!active) return
-      await load()
-    }
-    void run()
-    return () => {
-      active = false
-    }
-  }, [load])
-
   const onCreate = useCallback(async (payload: { product_id: number; branch_id: number; quantity: number }) => {
     setSubmitting(true)
     try {
@@ -144,6 +131,31 @@ export function InventoryPage() {
       setSubmitting(false)
     }
   }, [adjustingFor, load, token])
+
+  const canRead = user ? Boolean(user?.permissions?.includes('inventory.read')) : true
+
+  useEffect(() => {
+    let active = true
+    const run = async () => {
+      if (!active) return
+      if (!canRead) {
+        setIsLoading(false)
+        setError(null)
+        return
+      }
+      await load()
+    }
+    void run()
+    return () => {
+      active = false
+    }
+  }, [load, canRead])
+
+  if (!canRead) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">You do not have permission to view inventory.</div>
+    )
+  }
 
   const canCreate = user?.permissions?.includes('inventory.create')
   const canAdjust = user?.permissions?.includes('inventory.adjust')

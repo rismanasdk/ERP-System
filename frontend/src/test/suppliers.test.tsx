@@ -79,7 +79,7 @@ describe('SuppliersPage', () => {
   })
 
   it('allows creating a supplier successfully', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.create'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.create', 'suppliers.read'] }))
     const newSupplier = { id: 2, code: 'S002', name: 'NewSupply', is_active: true }
     const listMock = suppliersApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([]) // initial
@@ -109,7 +109,7 @@ describe('SuppliersPage', () => {
   })
 
   it('shows validation errors on empty create form', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.create'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.create', 'suppliers.read'] }))
     const listMock = suppliersApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([])
     const user = userEvent.setup()
@@ -133,7 +133,7 @@ describe('SuppliersPage', () => {
   })
 
   it('shows API error when create fails', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.create'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.create', 'suppliers.read'] }))
     const listMock = suppliersApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([])
     render(
@@ -162,7 +162,7 @@ describe('SuppliersPage', () => {
   })
 
   it('allows updating a supplier', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.update'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.update', 'suppliers.read'] }))
     const existing = { id: 3, code: 'S003', name: 'OldSupply', is_active: true }
     const listMock = suppliersApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([existing])
@@ -194,7 +194,7 @@ describe('SuppliersPage', () => {
   })
 
   it('shows API error when update fails', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.update'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.update', 'suppliers.read'] }))
     const existing = { id: 4, code: 'S004', name: 'Supply4', is_active: true }
     const listMock = suppliersApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([existing])
@@ -225,7 +225,7 @@ describe('SuppliersPage', () => {
   })
 
   it('allows deleting (soft-delete) a supplier', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.delete'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.delete', 'suppliers.read'] }))
     const existing = { id: 5, code: 'S005', name: 'ToDelete', is_active: true }
     const listMock = suppliersApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([existing])
@@ -256,7 +256,7 @@ describe('SuppliersPage', () => {
   })
 
   it('shows API error when delete fails', async () => {
-    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.delete'] }))
+    localStorage.setItem('erp_user', JSON.stringify({ id: 1, permissions: ['suppliers.delete', 'suppliers.read'] }))
     const existing = { id: 6, code: 'S006', name: 'ToDelete2', is_active: true }
     const listMock = suppliersApi.list as unknown as ReturnType<typeof vi.fn>
     listMock.mockResolvedValueOnce([existing])

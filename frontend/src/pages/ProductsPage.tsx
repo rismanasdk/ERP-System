@@ -55,18 +55,7 @@ export function ProductsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, token])
 
-  useEffect(() => {
-    let active = true
-    const run = async () => {
-      if (!active) return
-      await load()
-    }
-    void run()
-    return () => {
-      active = false
-    }
-  }, [load])
-
+  const canRead = user ? Boolean(user?.permissions?.includes('products.read')) : true
   const onCreate = useCallback(async (payload: Partial<Product>) => {
     setSubmitting(true)
     try {
@@ -117,10 +106,33 @@ export function ProductsPage() {
     }
   }, [confirmDialog, load, token])
 
-  const isSuperAdmin = user?.roles?.includes('SUPER_ADMIN')
-  const canCreate = isSuperAdmin || user?.permissions?.includes('products.create')
-  const canUpdate = isSuperAdmin || user?.permissions?.includes('products.update')
-  const canDelete = isSuperAdmin || user?.permissions?.includes('products.delete')
+  useEffect(() => {
+    let active = true
+    const run = async () => {
+      if (!active) return
+      if (!canRead) {
+        setIsLoading(false)
+        setError(null)
+        return
+      }
+      await load()
+    }
+    void run()
+    return () => {
+      active = false
+    }
+  }, [load, canRead])
+
+  if (!canRead) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">You do not have permission to view products.</div>
+    )
+  }
+  
+
+  const canCreate = user?.permissions?.includes('products.create')
+  const canUpdate = user?.permissions?.includes('products.update')
+  const canDelete = user?.permissions?.includes('products.delete')
 
   return (
     <div className="space-y-6">

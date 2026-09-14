@@ -12,22 +12,28 @@ import {
   PurchaseIcon,
   SalesIcon,
   ReportsIcon,
+  RoleIcon,
   OrganizationIcon,
   UsersIcon,
 } from '../../utils/iconsUtils'
 
+// Navigation items. When `permission` is present, the item is shown
+// only if the current user has that permission. Do NOT use role names
+// (e.g. SUPER_ADMIN) for visibility decisions — the backend is the
+// source of truth for permissions.
 const navItems = [
   { label: 'Dashboard', to: '/dashboard', icon: DashboardIcon },
-  { label: 'Products', to: '/products', icon: ProductsIcon },
+  { label: 'Products', to: '/products', icon: ProductsIcon, permission: 'products.read' },
   { label: 'Organization', to: '/organization', icon: OrganizationIcon },
-  { label: 'Users', to: '/users', icon: UsersIcon },
+  { label: 'Users', to: '/users', icon: UsersIcon, permission: 'users.read' },
+  { label: 'Roles', to: '/roles', icon: RoleIcon, permission: 'roles.read' },
   { label: 'Branch', to: '/branches', icon: BranchIcon },
-  { label: 'Customers', to: '/customers', icon: CustomersIcon },
-  { label: 'Suppliers', to: '/suppliers', icon: SuppliersIcon },
-  { label: 'Inventory', to: '/inventory', icon: InventoryIcon },
-  { label: 'Purchasing', to: '/purchasing', icon: PurchaseIcon },
-  { label: 'Sales', to: '/sales', icon: SalesIcon },
-  { label: 'Reports', to: '/reports', icon: ReportsIcon },
+  { label: 'Customers', to: '/customers', icon: CustomersIcon, permission: 'customers.read' },
+  { label: 'Suppliers', to: '/suppliers', icon: SuppliersIcon, permission: 'suppliers.read' },
+  { label: 'Inventory', to: '/inventory', icon: InventoryIcon, permission: 'inventory.read' },
+  { label: 'Purchasing', to: '/purchasing', icon: PurchaseIcon, permission: 'purchases.read' },
+  { label: 'Sales', to: '/sales', icon: SalesIcon, permission: 'sales.read' },
+  { label: 'Reports', to: '/reports', icon: ReportsIcon, permission: 'reports.read' },
 ]
 
 export function AppShell() {
@@ -44,20 +50,26 @@ export function AppShell() {
         </div>
         
         <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `flex items-center rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  isActive ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`
-              }
-            >
-              {item.icon && <item.icon className="h-5 w-5" />}
-              <span className="ml-3">{item.label}</span>
-            </NavLink>
-          ))}
+          {navItems
+            .filter((item) => {
+              // If a permission is specified, require it. Otherwise show.
+              if (!item.permission) return true
+              return Boolean(user?.permissions?.includes(item.permission))
+            })
+            .map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `flex items-center rounded-lg px-3 py-2 text-sm font-medium transition ${
+                    isActive ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  }`
+                }
+              >
+                {item.icon && <item.icon className="h-5 w-5" />}
+                <span className="ml-3">{item.label}</span>
+              </NavLink>
+            ))}
         </nav>
 
         <div className="border-t border-slate-700 p-3 mt-auto">

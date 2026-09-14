@@ -18,7 +18,7 @@ const currency = (n: number) =>
 
 export function SalesPage() {
   const { user } = useAuth()
-  const { selectedBranch, isAllBranches } = useBranch()
+  useBranch()
   const confirmDialog = useConfirm()
   const [items, setItems] = useState<Sale[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -50,42 +50,33 @@ export function SalesPage() {
     setBranchMap((current) => ({ ...current, ...Object.fromEntries(entries) }))
   }, [branchMap, token])
 
+  const canRead = user ? Boolean(user?.permissions?.includes('sales.read')) : true
+
   const load = useCallback(async () => {
+    if (!canRead) {
+      setIsLoading(false)
+      setError(null)
+      return
+    }
+
     setIsLoading(true)
     setError(null)
     try {
-      const payload = selectedBranch && selectedBranch.id > 0 && !isAllBranches
-        ? { branch_id: selectedBranch.id }
-        : filter.branch_id ? { branch_id: Number(filter.branch_id) } : undefined
-      const res = await salesApi.list(payload, token)
-      setItems(res)
-
-      const branchIds = Array.from(new Set(res.map((r) => r.branch_id))).filter(Boolean) as number[]
-      await fetchMissingBranches(branchIds)
+      const list = await salesApi.list({ branch_id: filter.branch_id ? Number(filter.branch_id) : undefined }, token)
+      const data = (list ?? []) as Sale[]
+      setItems(data)
+      await fetchMissingBranches([...new Set(data.map((d) => d.branch_id))])
     } catch (err) {
       const e = err as ApiError
-      if (e instanceof ApiError) {
-        if (e.status === 401) return setError('Session expired. Please sign in again.')
-        if (e.status === 403) return setError('You do not have access to sales.')
-        return setError(e.message)
+      if (e.status === 403) {
+        setError('You do not have access to sales.')
+      } else {
+        setError(e.message)
       }
-      setError('Unable to load sales')
     } finally {
       setIsLoading(false)
     }
-  }, [fetchMissingBranches, filter.branch_id, selectedBranch, isAllBranches, token])
-
-  useEffect(() => {
-    let active = true
-    const run = async () => {
-      if (!active) return
-      await load()
-    }
-    void run()
-    return () => {
-      active = false
-    }
-  }, [load])
+  }, [canRead, token, filter.branch_id, fetchMissingBranches])
 
   const onCreate = useCallback(async (payload: CreateSaleInput) => {
     setSubmitting(true)
@@ -168,10 +159,21 @@ export function SalesPage() {
     setViewingFor(row)
   }, [])
 
-  const isSuperAdmin = user?.roles?.includes('SUPER_ADMIN')
-  const canCreate = isSuperAdmin || user?.permissions?.includes('sales.create')
-  const canComplete = isSuperAdmin || user?.permissions?.includes('sales.complete')
-  const canCancel = isSuperAdmin || user?.permissions?.includes('sales.cancel')
+  useEffect(() => {
+    let active = true
+    const run = async () => {
+      if (!active) return
+      await load()
+    }
+    void run()
+    return () => {
+      active = false
+    }
+  }, [load])
+
+  const canCreate = user?.permissions?.includes('sales.create')
+  const canComplete = user?.permissions?.includes('sales.complete')
+  const canCancel = user?.permissions?.includes('sales.cancel')
 
   return (
     <div className="space-y-6">
