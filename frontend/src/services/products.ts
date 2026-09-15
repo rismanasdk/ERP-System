@@ -2,6 +2,8 @@ import type { ApiEnvelope } from '../types/auth' // pastikan diimport
 import type { Product, ProductFilter } from '../types/product'
 import { api } from '../lib/api'
 
+export type ProductUpdatePayload = Partial<Product> & { expected_version: number }
+
 export const productsApi = {
   list: async (filter?: ProductFilter, token?: string): Promise<Product[]> => {
     const q = [] as string[]
@@ -23,7 +25,7 @@ export const productsApi = {
     return res.data
   },
 
-  update: async (id: number, payload: Partial<Product>, token?: string): Promise<Product> => {
+  update: async (id: number, payload: ProductUpdatePayload, token?: string): Promise<Product> => {
     const res = await api.put<ApiEnvelope<Product>>(`/api/v1/products/${id}`, payload, token)
     return res.data
   },

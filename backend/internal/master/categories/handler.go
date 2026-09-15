@@ -16,9 +16,10 @@ type Handler struct{ service *Service }
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
 type request struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description,omitempty"`
-	IsActive    *bool   `json:"is_active,omitempty"`
+	Name            string  `json:"name"`
+	Description     *string `json:"description,omitempty"`
+	IsActive        *bool   `json:"is_active,omitempty"`
+	ExpectedVersion int64   `json:"expected_version,omitempty"`
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +83,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		categoryError(w, 400, "INVALID_REQUEST", "invalid request body")
 		return
 	}
-	item := &Category{ID: id, Name: req.Name, Description: req.Description, IsActive: req.IsActive == nil || *req.IsActive}
+	item := &Category{ID: id, Name: req.Name, Description: req.Description, Version: req.ExpectedVersion, IsActive: req.IsActive == nil || *req.IsActive}
 	if err := h.service.Update(r.Context(), item); err != nil {
 		handleError(w, err)
 		return
@@ -113,8 +114,12 @@ func handleError(w http.ResponseWriter, err error) {
 		categoryError(w, 404, "NOT_FOUND", err.Error())
 	case errors.Is(err, ErrDuplicate), errors.Is(err, ErrNameRequired):
 		categoryError(w, 400, "INVALID_REQUEST", err.Error())
+	case errors.Is(err, ErrVersionRequired):
+		categoryError(w, 400, "INVALID_REQUEST", err.Error())
 	case errors.Is(err, ErrInUse):
 		categoryError(w, 409, "CATEGORY_IN_USE", err.Error())
+	case errors.Is(err, ErrVersionConflict):
+		categoryError(w, 409, "CONFLICT", "category was modified by another request; reload and try again")
 	default:
 		categoryError(w, 500, "INTERNAL_SERVER_ERROR", "failed to save category")
 	}

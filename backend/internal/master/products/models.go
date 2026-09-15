@@ -14,6 +14,7 @@ type Product struct {
 	PurchasePrice float64    `json:"purchase_price"`
 	SellingPrice  float64    `json:"selling_price"`
 	MinimumStock  int64      `json:"minimum_stock"`
+	Version       int64      `json:"version"`
 	IsActive      bool       `json:"is_active"`
 	CreatedAt     time.Time  `json:"created_at,omitempty"`
 	UpdatedAt     time.Time  `json:"updated_at,omitempty"`

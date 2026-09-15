@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX product_categories_name_lower_trim_key ON product_categories (LOWER(BTRIM(name)));

@@ -30,6 +30,7 @@ var (
 	ErrProductDeleted          = errors.New("product deleted")
 	ErrProductDuplicateSKU     = errors.New("sku already exists")
 	ErrProductDuplicateBarcode = errors.New("barcode already exists")
+	ErrProductVersionConflict  = errors.New("product was modified by another request")
 )
 
 type ValidationError struct {
@@ -118,6 +119,9 @@ func (s *Service) Create(ctx context.Context, product *Product) (int64, error) {
 }
 
 func (s *Service) Update(ctx context.Context, product *Product) error {
+	if product.Version <= 0 {
+		return &ValidationError{Field: "expected_version", Message: "must be greater than zero"}
+	}
 	existing, err := s.repo.GetByIDIncludeDeleted(ctx, product.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -160,9 +164,20 @@ func (s *Service) Update(ctx context.Context, product *Product) error {
 		}
 	}()
 
-	if err := s.repo.UpdateWithTx(ctx, tx, product); err != nil {
+	if err = s.repo.UpdateWithTx(ctx, tx, product); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrProductNotFound
+			_, deleted, stateErr := s.repo.GetVersionStateWithTx(ctx, tx, product.ID)
+			if errors.Is(stateErr, sql.ErrNoRows) {
+				return ErrProductNotFound
+			}
+			if stateErr != nil {
+				return stateErr
+			}
+			if deleted {
+				return ErrProductDeleted
+			}
+			err = ErrProductVersionConflict
+			return err
 		}
 		return err
 	}

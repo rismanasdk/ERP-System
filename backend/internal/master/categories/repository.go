@@ -11,8 +11,12 @@ type Repository struct{ db *sql.DB }
 
 func NewRepository(db *sql.DB) *Repository { return &Repository{db: db} }
 
+func (r *Repository) BeginTx(ctx context.Context) (*sql.Tx, error) {
+	return r.db.BeginTx(ctx, nil)
+}
+
 func (r *Repository) List(ctx context.Context, filter Filter) ([]Category, error) {
-	query := `SELECT c.id, c.name, c.description, c.is_active, COUNT(p.id), c.created_at, c.updated_at FROM product_categories c LEFT JOIN products p ON p.category_id = c.id AND p.deleted_at IS NULL`
+	query := `SELECT c.id, c.name, c.description, c.is_active, COUNT(p.id), c.version, c.created_at, c.updated_at FROM product_categories c LEFT JOIN products p ON p.category_id = c.id AND p.deleted_at IS NULL`
 	args := []any{}
 	clauses := []string{}
 	idx := 1
@@ -38,7 +42,7 @@ func (r *Repository) List(ctx context.Context, filter Filter) ([]Category, error
 	var result []Category
 	for rows.Next() {
 		var item Category
-		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.IsActive, &item.ProductCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.IsActive, &item.ProductCount, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -48,7 +52,7 @@ func (r *Repository) List(ctx context.Context, filter Filter) ([]Category, error
 
 func (r *Repository) GetByID(ctx context.Context, id int64) (*Category, error) {
 	var item Category
-	err := r.db.QueryRowContext(ctx, `SELECT c.id, c.name, c.description, c.is_active, COUNT(p.id), c.created_at, c.updated_at FROM product_categories c LEFT JOIN products p ON p.category_id = c.id AND p.deleted_at IS NULL WHERE c.id = $1 GROUP BY c.id`, id).Scan(&item.ID, &item.Name, &item.Description, &item.IsActive, &item.ProductCount, &item.CreatedAt, &item.UpdatedAt)
+	err := r.db.QueryRowContext(ctx, `SELECT c.id, c.name, c.description, c.is_active, COUNT(p.id), c.version, c.created_at, c.updated_at FROM product_categories c LEFT JOIN products p ON p.category_id = c.id AND p.deleted_at IS NULL WHERE c.id = $1 GROUP BY c.id`, id).Scan(&item.ID, &item.Name, &item.Description, &item.IsActive, &item.ProductCount, &item.Version, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +61,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Category, error) {
 
 func (r *Repository) GetByName(ctx context.Context, name string) (*Category, error) {
 	var item Category
-	err := r.db.QueryRowContext(ctx, `SELECT id, name, description, is_active, 0, created_at, updated_at FROM product_categories WHERE LOWER(name) = LOWER($1)`, strings.TrimSpace(name)).Scan(&item.ID, &item.Name, &item.Description, &item.IsActive, &item.ProductCount, &item.CreatedAt, &item.UpdatedAt)
+	err := r.db.QueryRowContext(ctx, `SELECT id, name, description, is_active, 0, version, created_at, updated_at FROM product_categories WHERE LOWER(name) = LOWER($1)`, strings.TrimSpace(name)).Scan(&item.ID, &item.Name, &item.Description, &item.IsActive, &item.ProductCount, &item.Version, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -65,12 +69,32 @@ func (r *Repository) GetByName(ctx context.Context, name string) (*Category, err
 }
 
 func (r *Repository) Create(ctx context.Context, item *Category) (int64, error) {
+	return r.CreateWithTx(ctx, nil, item)
+}
+func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, item *Category) (int64, error) {
 	var id int64
-	err := r.db.QueryRowContext(ctx, `INSERT INTO product_categories (name, description, is_active) VALUES ($1, $2, $3) RETURNING id`, item.Name, item.Description, item.IsActive).Scan(&id)
+	query := `INSERT INTO product_categories (name, description, is_active) VALUES ($1, $2, $3) RETURNING id`
+	var row *sql.Row
+	if tx != nil {
+		row = tx.QueryRowContext(ctx, query, item.Name, item.Description, item.IsActive)
+	} else {
+		row = r.db.QueryRowContext(ctx, query, item.Name, item.Description, item.IsActive)
+	}
+	err := row.Scan(&id)
 	return id, err
 }
 func (r *Repository) Update(ctx context.Context, item *Category) error {
-	res, err := r.db.ExecContext(ctx, `UPDATE product_categories SET name = $1, description = $2, is_active = $3, updated_at = NOW() WHERE id = $4`, item.Name, item.Description, item.IsActive, item.ID)
+	return r.UpdateWithTx(ctx, nil, item)
+}
+func (r *Repository) UpdateWithTx(ctx context.Context, tx *sql.Tx, item *Category) error {
+	query := `UPDATE product_categories SET name = $1, description = $2, is_active = $3, version = version + 1, updated_at = NOW() WHERE id = $4 AND version = $5`
+	var res sql.Result
+	var err error
+	if tx != nil {
+		res, err = tx.ExecContext(ctx, query, item.Name, item.Description, item.IsActive, item.ID, item.Version)
+	} else {
+		res, err = r.db.ExecContext(ctx, query, item.Name, item.Description, item.IsActive, item.ID, item.Version)
+	}
 	if err != nil {
 		return err
 	}
@@ -80,8 +104,23 @@ func (r *Repository) Update(ctx context.Context, item *Category) error {
 	}
 	return err
 }
+
+func (r *Repository) GetVersionStateWithTx(ctx context.Context, tx *sql.Tx, id int64) (version int64, err error) {
+	err = tx.QueryRowContext(ctx, `SELECT version FROM product_categories WHERE id = $1 FOR UPDATE`, id).Scan(&version)
+	return
+}
 func (r *Repository) Delete(ctx context.Context, id int64) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM product_categories WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM products WHERE category_id = $1 AND deleted_at IS NULL)`, id)
+	return r.DeleteWithTx(ctx, nil, id)
+}
+func (r *Repository) DeleteWithTx(ctx context.Context, tx *sql.Tx, id int64) error {
+	query := `DELETE FROM product_categories WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM products WHERE category_id = $1 AND deleted_at IS NULL)`
+	var res sql.Result
+	var err error
+	if tx != nil {
+		res, err = tx.ExecContext(ctx, query, id)
+	} else {
+		res, err = r.db.ExecContext(ctx, query, id)
+	}
 	if err != nil {
 		return err
 	}

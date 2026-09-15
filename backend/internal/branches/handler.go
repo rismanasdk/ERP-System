@@ -33,7 +33,10 @@ type createBranchRequest struct {
 	IsActive *bool  `json:"is_active,omitempty"`
 }
 
-type updateBranchRequest = createBranchRequest
+type updateBranchRequest struct {
+	createBranchRequest
+	ExpectedVersion int64 `json:"expected_version"`
+}
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	var active *bool
@@ -116,6 +119,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		ID:       id,
 		Name:     req.Name,
 		Code:     req.Code,
+		Version:  req.ExpectedVersion,
 		IsActive: true,
 	}
 	if req.IsActive != nil {
@@ -154,6 +158,10 @@ func handleServiceError(w http.ResponseWriter, err error, message string) {
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	case errors.Is(err, ErrBranchCodeDuplicate):
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "branch code already exists"))
+	case errors.Is(err, ErrBranchVersionConflict):
+		response.JSONError(w, http.StatusConflict, response.NewAPIError(http.StatusConflict, "CONFLICT", err.Error()))
+	case errors.Is(err, ErrBranchVersionRequired):
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	default:
 		response.JSONError(w, http.StatusInternalServerError, response.NewAPIError(http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", message))
 	}

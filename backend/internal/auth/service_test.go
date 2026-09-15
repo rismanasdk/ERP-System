@@ -249,14 +249,15 @@ func TestAuthenticate_AuditRecordedWithActor(t *testing.T) {
 	email := "alice@example.com"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE email = $1
-    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+	`)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "version", "created_at", "updated_at"}).AddRow(
 		userID,
 		email,
 		hashedPassword,
-		"Alice",
+			"Alice",
+			int64(1),
 		time.Now(),
 		time.Now(),
 	))
@@ -332,14 +333,15 @@ func TestAuthenticate_WrongPasswordFails(t *testing.T) {
 	email := "alice@example.com"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE email = $1
-    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+	`)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "version", "created_at", "updated_at"}).AddRow(
 		int64(123),
 		email,
 		hashedPassword,
-		"Alice",
+			"Alice",
+			int64(1),
 		time.Now(),
 		time.Now(),
 	))
@@ -380,14 +382,15 @@ func TestAuthenticate_EmptyPasswordFails(t *testing.T) {
 	email := "alice@example.com"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE email = $1
-    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+	`)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "version", "created_at", "updated_at"}).AddRow(
 		int64(123),
 		email,
 		hashedPassword,
-		"Alice",
+			"Alice",
+			int64(1),
 		time.Now(),
 		time.Now(),
 	))
@@ -430,14 +433,15 @@ func TestAuthenticate_AuditFailureDoesNotFailAuthentication(t *testing.T) {
 	email := "alice@example.com"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE email = $1
-    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+	`)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "version", "created_at", "updated_at"}).AddRow(
 		userID,
 		email,
 		hashedPassword,
-		"Alice",
+			"Alice",
+			int64(1),
 		time.Now(),
 		time.Now(),
 	))
@@ -488,10 +492,10 @@ func TestAuthenticate_InactiveUserFailsWithGenericCredentialsError(t *testing.T)
 	service := NewService(users.NewRepository(db), nil, nil, nil, nil)
 	email := "inactive@example.com"
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE email = $1
-    `)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(int64(321), email, hashedPassword, "Inactive", time.Now(), time.Now()))
+	`)).WithArgs(email).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "version", "created_at", "updated_at"}).AddRow(int64(321), email, hashedPassword, "Inactive", int64(1), time.Now(), time.Now()))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT is_active FROM users WHERE id = $1`)).WithArgs(int64(321)).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(false))
 	user, perms, err := service.Authenticate(context.Background(), email, "password123")
 	if !errors.Is(err, ErrInvalidCredentials) {
@@ -582,14 +586,15 @@ func TestRefreshAccessToken_AuditRecordedWithActor(t *testing.T) {
 	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(77)))
 	mock.ExpectCommit()
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE id = $1
-    `)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+	`)).WithArgs(userID).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "version", "created_at", "updated_at"}).AddRow(
 		userID,
 		"test@example.com",
 		"hash",
-		"Test User",
+			"Test User",
+			int64(1),
 		timeNow,
 		timeNow,
 	))
@@ -978,14 +983,15 @@ func TestRefreshAccessToken_ValidRotation(t *testing.T) {
 	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(2))
 	mock.ExpectCommit()
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, email, password_hash, name, created_at, updated_at
+		SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE id = $1
-    `)).WithArgs(int64(123)).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "created_at", "updated_at"}).AddRow(
+	`)).WithArgs(int64(123)).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash", "name", "version", "created_at", "updated_at"}).AddRow(
 		int64(123),
 		"test@example.com",
 		"hash",
-		"Test User",
+			"Test User",
+			int64(1),
 		timeNow,
 		timeNow,
 	))

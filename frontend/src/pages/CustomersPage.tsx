@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import type { Customer, CustomerFilter } from '../types/customer'
-import { customersApi } from '../services/customers'
+import { customersApi, type CustomerUpdatePayload } from '../services/customers'
 import { readStoredAccessToken } from '../services/authSession'
 import { CustomerForm } from '../components/customers/CustomerForm'
 import { ApiError } from '../lib/api'
@@ -101,11 +101,18 @@ export function CustomersPage() {
     if (!editing) return
     setSubmitting(true)
     try {
-      await customersApi.update(editing.id, payload, token)
+      const updatePayload: CustomerUpdatePayload = { ...payload, expected_version: editing.version }
+      await customersApi.update(editing.id, updatePayload, token)
       setEditing(null)
       await load()
     } catch (err) {
       const e = err as ApiError
+      if (e instanceof ApiError && e.status === 409) {
+        setEditing(null)
+        setError('This customer was changed by someone else. The latest data has been loaded.')
+        await load()
+        return
+      }
       setError(e.message)
       return
     } finally {

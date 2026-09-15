@@ -19,7 +19,7 @@ func TestCustomerService_Create_Success(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery(`SELECT id, code, name, phone, email, address, tax_id, is_active, created_at, updated_at, deleted_at FROM customers WHERE code = \$1`).
+	mock.ExpectQuery(`SELECT id, code, name, phone, email, address, tax_id, version, is_active, created_at, updated_at, deleted_at FROM customers WHERE code = \$1`).
 		WithArgs("CUST-001").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectBegin()
@@ -49,9 +49,9 @@ func TestCustomerService_Create_DuplicateCode(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery(`SELECT id, code, name, phone, email, address, tax_id, is_active, created_at, updated_at, deleted_at FROM customers WHERE code = \$1`).
+	mock.ExpectQuery(`SELECT id, code, name, phone, email, address, tax_id, version, is_active, created_at, updated_at, deleted_at FROM customers WHERE code = \$1`).
 		WithArgs("CUST-001").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "phone", "email", "address", "tax_id", "is_active", "created_at", "updated_at", "deleted_at"}).AddRow(int64(1), "CUST-001", "Alpha", nil, nil, nil, nil, true, time.Now(), time.Now(), nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "phone", "email", "address", "tax_id", "version", "is_active", "created_at", "updated_at", "deleted_at"}).AddRow(int64(1), "CUST-001", "Alpha", nil, nil, nil, nil, int64(1), true, time.Now(), time.Now(), nil))
 
 	repo := NewRepository(db)
 	service := NewService(repo, nil)
@@ -72,7 +72,7 @@ func TestCustomerService_GetByID_NotFound(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery(`SELECT id, code, name, phone, email, address, tax_id, is_active, created_at, updated_at, deleted_at FROM customers WHERE id = \$1 AND deleted_at IS NULL`).
+	mock.ExpectQuery(`SELECT id, code, name, phone, email, address, tax_id, version, is_active, created_at, updated_at, deleted_at FROM customers WHERE id = \$1 AND deleted_at IS NULL`).
 		WithArgs(int64(42)).
 		WillReturnError(sql.ErrNoRows)
 

@@ -48,7 +48,7 @@ func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, supplier *Sup
 func (r *Repository) GetByID(ctx context.Context, id int64) (*Supplier, error) {
 	supplier := &Supplier{}
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, code, name, phone, email, address, is_active, created_at, updated_at, deleted_at
+		SELECT id, code, name, phone, email, address, version, is_active, created_at, updated_at, deleted_at
 		FROM suppliers
 		WHERE id = $1 AND deleted_at IS NULL
 	`, id).Scan(
@@ -58,6 +58,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Supplier, error) {
 		&supplier.Phone,
 		&supplier.Email,
 		&supplier.Address,
+		&supplier.Version,
 		&supplier.IsActive,
 		&supplier.CreatedAt,
 		&supplier.UpdatedAt,
@@ -72,7 +73,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Supplier, error) {
 func (r *Repository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*Supplier, error) {
 	supplier := &Supplier{}
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, code, name, phone, email, address, is_active, created_at, updated_at, deleted_at
+		SELECT id, code, name, phone, email, address, version, is_active, created_at, updated_at, deleted_at
 		FROM suppliers
 		WHERE id = $1
 	`, id).Scan(
@@ -82,6 +83,7 @@ func (r *Repository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*Supp
 		&supplier.Phone,
 		&supplier.Email,
 		&supplier.Address,
+		&supplier.Version,
 		&supplier.IsActive,
 		&supplier.CreatedAt,
 		&supplier.UpdatedAt,
@@ -107,7 +109,7 @@ func (r *Repository) getByColumn(ctx context.Context, column, value string, incl
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, code, name, phone, email, address, is_active, created_at, updated_at, deleted_at
+		SELECT id, code, name, phone, email, address, version, is_active, created_at, updated_at, deleted_at
 		FROM suppliers
 		WHERE %s = $1`, column)
 	if !includeDeleted {
@@ -122,6 +124,7 @@ func (r *Repository) getByColumn(ctx context.Context, column, value string, incl
 		&supplier.Phone,
 		&supplier.Email,
 		&supplier.Address,
+		&supplier.Version,
 		&supplier.IsActive,
 		&supplier.CreatedAt,
 		&supplier.UpdatedAt,
@@ -135,7 +138,7 @@ func (r *Repository) getByColumn(ctx context.Context, column, value string, incl
 
 func (r *Repository) List(ctx context.Context, filter SupplierFilter) ([]Supplier, error) {
 	query := `
-		SELECT id, code, name, phone, email, address, is_active, created_at, updated_at, deleted_at
+		SELECT id, code, name, phone, email, address, version, is_active, created_at, updated_at, deleted_at
 		FROM suppliers
 		WHERE deleted_at IS NULL
 	`
@@ -175,6 +178,7 @@ func (r *Repository) List(ctx context.Context, filter SupplierFilter) ([]Supplie
 			&supplier.Phone,
 			&supplier.Email,
 			&supplier.Address,
+			&supplier.Version,
 			&supplier.IsActive,
 			&supplier.CreatedAt,
 			&supplier.UpdatedAt,
@@ -193,9 +197,9 @@ func (r *Repository) List(ctx context.Context, filter SupplierFilter) ([]Supplie
 func (r *Repository) Update(ctx context.Context, supplier *Supplier) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE suppliers
-		SET code = $1, name = $2, phone = $3, email = $4, address = $5, is_active = $6, updated_at = NOW()
-		WHERE id = $7 AND deleted_at IS NULL
-	`, supplier.Code, supplier.Name, supplier.Phone, supplier.Email, supplier.Address, supplier.IsActive, supplier.ID)
+				SET code = $1, name = $2, phone = $3, email = $4, address = $5, is_active = $6, version = version + 1, updated_at = NOW()
+				WHERE id = $7 AND version = $8 AND deleted_at IS NULL
+		`, supplier.Code, supplier.Name, supplier.Phone, supplier.Email, supplier.Address, supplier.IsActive, supplier.ID, supplier.Version)
 	if err != nil {
 		return err
 	}
@@ -209,12 +213,18 @@ func (r *Repository) Update(ctx context.Context, supplier *Supplier) error {
 	return nil
 }
 
+func (r *Repository) GetVersionStateWithTx(ctx context.Context, tx *sql.Tx, id int64) (int64, error) {
+	var version int64
+	err := tx.QueryRowContext(ctx, `SELECT version FROM suppliers WHERE id = $1 FOR UPDATE`, id).Scan(&version)
+	return version, err
+}
+
 func (r *Repository) UpdateWithTx(ctx context.Context, tx *sql.Tx, supplier *Supplier) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE suppliers
-		SET code = $1, name = $2, phone = $3, email = $4, address = $5, is_active = $6, updated_at = NOW()
-		WHERE id = $7 AND deleted_at IS NULL
-	`, supplier.Code, supplier.Name, supplier.Phone, supplier.Email, supplier.Address, supplier.IsActive, supplier.ID)
+		SET code = $1, name = $2, phone = $3, email = $4, address = $5, is_active = $6, version = version + 1, updated_at = NOW()
+		WHERE id = $7 AND version = $8 AND deleted_at IS NULL
+	`, supplier.Code, supplier.Name, supplier.Phone, supplier.Email, supplier.Address, supplier.IsActive, supplier.ID, supplier.Version)
 	if err != nil {
 		return err
 	}

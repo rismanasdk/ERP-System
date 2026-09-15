@@ -19,7 +19,7 @@ func TestSupplierService_Create_Success(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("SELECT id, code, name, phone, email, address, is_active, created_at, updated_at, deleted_at FROM suppliers WHERE code = \\$1 AND deleted_at IS NULL").
+	mock.ExpectQuery("SELECT id, code, name, phone, email, address, version, is_active, created_at, updated_at, deleted_at FROM suppliers WHERE code = \\$1 AND deleted_at IS NULL").
 		WithArgs("SUP-001").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectBegin()
@@ -49,9 +49,9 @@ func TestSupplierService_Create_DuplicateCode(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("SELECT id, code, name, phone, email, address, is_active, created_at, updated_at, deleted_at FROM suppliers WHERE code = \\$1").
+	mock.ExpectQuery("SELECT id, code, name, phone, email, address, version, is_active, created_at, updated_at, deleted_at FROM suppliers WHERE code = \\$1").
 		WithArgs("SUP-001").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "phone", "email", "address", "is_active", "created_at", "updated_at", "deleted_at"}).AddRow(int64(1), "SUP-001", "Alpha", nil, nil, nil, true, time.Now(), time.Now(), nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "phone", "email", "address", "version", "is_active", "created_at", "updated_at", "deleted_at"}).AddRow(int64(1), "SUP-001", "Alpha", nil, nil, nil, int64(1), true, time.Now(), time.Now(), nil))
 
 	repo := NewRepository(db)
 	service := NewService(repo, nil)
@@ -72,7 +72,7 @@ func TestSupplierService_GetByID_NotFound(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("SELECT id, code, name, phone, email, address, is_active, created_at, updated_at, deleted_at FROM suppliers WHERE id = \\$1 AND deleted_at IS NULL").
+	mock.ExpectQuery("SELECT id, code, name, phone, email, address, version, is_active, created_at, updated_at, deleted_at FROM suppliers WHERE id = \\$1 AND deleted_at IS NULL").
 		WithArgs(int64(42)).
 		WillReturnError(sql.ErrNoRows)
 

@@ -44,6 +44,11 @@ type createProductRequest struct {
 
 type updateProductRequest = createProductRequest
 
+type productUpdateRequest struct {
+	createProductRequest
+	ExpectedVersion int64 `json:"expected_version"`
+}
+
 type productResponse struct {
 	Product *Product `json:"product"`
 }
@@ -141,7 +146,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req updateProductRequest
+	var req productUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid request body"))
 		return
@@ -159,6 +164,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		PurchasePrice: req.PurchasePrice,
 		SellingPrice:  req.SellingPrice,
 		MinimumStock:  req.MinimumStock,
+		Version:       req.ExpectedVersion,
 		IsActive:      true,
 	}
 	if req.IsActive != nil {
@@ -209,6 +215,8 @@ func handleServiceError(w http.ResponseWriter, err error, message string) {
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "sku already exists"))
 	case errors.Is(err, ErrProductDuplicateBarcode):
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "barcode already exists"))
+	case errors.Is(err, ErrProductVersionConflict):
+		response.JSONError(w, http.StatusConflict, response.NewAPIError(http.StatusConflict, "CONFLICT", "product was modified by another request; reload and try again"))
 	default:
 		var validationErr *ValidationError
 		if errors.As(err, &validationErr) {

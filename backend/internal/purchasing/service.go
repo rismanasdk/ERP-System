@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"erp-system/backend/internal/audit"
@@ -246,13 +247,22 @@ func (s *Service) ReceivePurchase(ctx context.Context, purchaseID int64, input R
 		}
 		seen[received.PurchaseItemID] = true
 	}
+	orderedReceivedItems := append([]ReceivePurchaseItemInput(nil), input.Items...)
+	sort.SliceStable(orderedReceivedItems, func(i, j int) bool {
+		left := byID[orderedReceivedItems[i].PurchaseItemID]
+		right := byID[orderedReceivedItems[j].PurchaseItemID]
+		if left.ProductID != right.ProductID {
+			return left.ProductID < right.ProductID
+		}
+		return left.ID < right.ID
+	})
 	receipt := &PurchaseReceipt{PurchaseID: purchaseID, BranchID: purchase.BranchID, ReceivedBy: userID, Notes: input.Notes}
 	receiptID, err = s.repo.CreateReceiptWithTx(ctx, tx, receipt)
 	if err != nil {
 		return 0, err
 	}
 	totalReceived := int64(0)
-	for _, received := range input.Items {
+	for _, received := range orderedReceivedItems {
 		item := byID[received.PurchaseItemID]
 		inventoryRow, invErr := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, purchase.BranchID)
 		if invErr != nil {
@@ -582,6 +592,12 @@ func (s *Service) CompletePurchase(ctx context.Context, purchaseID int64) (err e
 	if len(items) == 0 {
 		return ErrPurchaseHasNoItems
 	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].ProductID != items[j].ProductID {
+			return items[i].ProductID < items[j].ProductID
+		}
+		return items[i].ID < items[j].ID
+	})
 
 	for _, item := range items {
 		product, err := s.productSvc.GetByID(ctx, item.ProductID)
@@ -595,33 +611,13 @@ func (s *Service) CompletePurchase(ctx context.Context, purchaseID int64) (err e
 			return ErrProductInactive
 		}
 
-		inventoryRow, invErr := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, purchase.BranchID)
+		inventoryRow, invErr := s.inventoryRepo.EnsureInventoryWithTx(ctx, tx, item.ProductID, purchase.BranchID)
 		if invErr != nil {
-			if errors.Is(invErr, sql.ErrNoRows) {
-				// try to create inventory row; handle possible concurrent insert (unique constraint)
-				if _, err = s.inventoryRepo.CreateWithTx(ctx, tx, &inventory.Inventory{ProductID: item.ProductID, BranchID: purchase.BranchID, Quantity: item.Quantity}); err != nil {
-					if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
-						// another tx created the inventory concurrently — re-read with FOR UPDATE and apply update
-						inventoryRow, invErr = s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, purchase.BranchID)
-						if invErr != nil {
-							return invErr
-						}
-						newQuantity := inventoryRow.Quantity + item.Quantity
-						if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, newQuantity); err != nil {
-							return err
-						}
-					} else {
-						return err
-					}
-				}
-			} else {
-				return invErr
-			}
-		} else {
-			newQuantity := inventoryRow.Quantity + item.Quantity
-			if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, newQuantity); err != nil {
-				return err
-			}
+			return invErr
+		}
+		newQuantity := inventoryRow.Quantity + item.Quantity
+		if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, newQuantity); err != nil {
+			return err
 		}
 
 		movement := &inventory.StockMovement{
@@ -723,6 +719,12 @@ func (s *Service) CancelPurchase(ctx context.Context, purchaseID int64) (err err
 		if len(items) == 0 {
 			return ErrPurchaseHasNoItems
 		}
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].ProductID != items[j].ProductID {
+				return items[i].ProductID < items[j].ProductID
+			}
+			return items[i].ID < items[j].ID
+		})
 		for _, item := range items {
 			product, err := s.productSvc.GetByID(ctx, item.ProductID)
 			if err != nil {

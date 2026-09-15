@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"erp-system/backend/internal/audit"
 )
 
 var (
@@ -15,11 +17,20 @@ var (
 )
 
 type Repository struct {
-	db *sql.DB
+	db       *sql.DB
+	auditSvc auditRecorder
 }
 
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+type auditRecorder interface {
+	RecordWithTx(context.Context, *sql.Tx, audit.AuditLog) (int64, error)
+}
+
+func NewRepository(db *sql.DB, auditSvcs ...auditRecorder) *Repository {
+	var auditSvc auditRecorder
+	if len(auditSvcs) > 0 {
+		auditSvc = auditSvcs[0]
+	}
+	return &Repository{db: db, auditSvc: auditSvc}
 }
 
 func (r *Repository) GetByName(ctx context.Context, name string) (*Role, error) {
@@ -121,7 +132,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Role, error) {
 	return role, nil
 }
 
-func (r *Repository) Create(ctx context.Context, role *Role, permissionNames []string) (int64, error) {
+func (r *Repository) Create(ctx context.Context, role *Role, permissionNames []string, actorUserIDs ...*int64) (int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -139,10 +150,19 @@ func (r *Repository) Create(ctx context.Context, role *Role, permissionNames []s
 	if err := replacePermissions(ctx, tx, id, permissionNames); err != nil {
 		return 0, err
 	}
+	if err := r.recordAudit(ctx, tx, audit.AuditLog{
+		ActorUserID: firstActorUserID(actorUserIDs),
+		Action:      "role.create",
+		Resource:    "role",
+		ResourceID:  stringID(id),
+		Metadata:    roleAuditMetadata(role, permissionNames),
+	}); err != nil {
+		return 0, err
+	}
 	return id, tx.Commit()
 }
 
-func (r *Repository) Update(ctx context.Context, role *Role, permissionNames []string) error {
+func (r *Repository) Update(ctx context.Context, role *Role, permissionNames []string, actorUserIDs ...*int64) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -168,10 +188,19 @@ func (r *Repository) Update(ctx context.Context, role *Role, permissionNames []s
 	if err := replacePermissions(ctx, tx, role.ID, permissionNames); err != nil {
 		return err
 	}
+	if err := r.recordAudit(ctx, tx, audit.AuditLog{
+		ActorUserID: firstActorUserID(actorUserIDs),
+		Action:      "role.update",
+		Resource:    "role",
+		ResourceID:  stringID(role.ID),
+		Metadata:    roleAuditMetadata(role, permissionNames),
+	}); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
-func (r *Repository) Delete(ctx context.Context, id int64) error {
+func (r *Repository) Delete(ctx context.Context, id int64, actorUserIDs ...*int64) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -199,7 +228,44 @@ func (r *Repository) Delete(ctx context.Context, id int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM roles WHERE id = $1`, id); err != nil {
 		return err
 	}
+	if err := r.recordAudit(ctx, tx, audit.AuditLog{
+		ActorUserID: firstActorUserID(actorUserIDs),
+		Action:      "role.delete",
+		Resource:    "role",
+		ResourceID:  stringID(id),
+		Metadata:    map[string]any{"name": name},
+	}); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func (r *Repository) recordAudit(ctx context.Context, tx *sql.Tx, auditLog audit.AuditLog) error {
+	if r.auditSvc == nil {
+		return nil
+	}
+	_, err := r.auditSvc.RecordWithTx(ctx, tx, auditLog)
+	return err
+}
+
+func firstActorUserID(actorUserIDs []*int64) *int64 {
+	if len(actorUserIDs) == 0 {
+		return nil
+	}
+	return actorUserIDs[0]
+}
+
+func stringID(id int64) *string {
+	value := fmt.Sprintf("%d", id)
+	return &value
+}
+
+func roleAuditMetadata(role *Role, permissionNames []string) map[string]any {
+	return map[string]any{
+		"name":        role.Name,
+		"description": role.Description,
+		"permissions": permissionNames,
+	}
 }
 
 func replacePermissions(ctx context.Context, tx *sql.Tx, roleID int64, permissionNames []string) error {

@@ -4,6 +4,7 @@ export type ProductCategory = {
   description?: string | null
   is_active: boolean
   product_count: number
+  version: number
   created_at?: string
   updated_at?: string
 }

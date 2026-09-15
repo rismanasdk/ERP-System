@@ -48,7 +48,7 @@ func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, customer *Cus
 func (r *Repository) GetByID(ctx context.Context, id int64) (*Customer, error) {
 	customer := &Customer{}
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, code, name, phone, email, address, tax_id, is_active, created_at, updated_at, deleted_at
+			SELECT id, code, name, phone, email, address, tax_id, version, is_active, created_at, updated_at, deleted_at
 		FROM customers
 		WHERE id = $1 AND deleted_at IS NULL
 	`, id).Scan(
@@ -59,6 +59,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Customer, error) {
 		&customer.Email,
 		&customer.Address,
 		&customer.TaxID,
+		&customer.Version,
 		&customer.IsActive,
 		&customer.CreatedAt,
 		&customer.UpdatedAt,
@@ -73,7 +74,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Customer, error) {
 func (r *Repository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*Customer, error) {
 	customer := &Customer{}
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, code, name, phone, email, address, tax_id, is_active, created_at, updated_at, deleted_at
+			SELECT id, code, name, phone, email, address, tax_id, version, is_active, created_at, updated_at, deleted_at
 		FROM customers
 		WHERE id = $1
 	`, id).Scan(
@@ -84,6 +85,7 @@ func (r *Repository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*Cust
 		&customer.Email,
 		&customer.Address,
 		&customer.TaxID,
+		&customer.Version,
 		&customer.IsActive,
 		&customer.CreatedAt,
 		&customer.UpdatedAt,
@@ -105,7 +107,7 @@ func (r *Repository) getByColumn(ctx context.Context, column, value string) (*Cu
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, code, name, phone, email, address, tax_id, is_active, created_at, updated_at, deleted_at
+			SELECT id, code, name, phone, email, address, tax_id, version, is_active, created_at, updated_at, deleted_at
 		FROM customers
 		WHERE %s = $1
 	`, column)
@@ -119,6 +121,7 @@ func (r *Repository) getByColumn(ctx context.Context, column, value string) (*Cu
 		&customer.Email,
 		&customer.Address,
 		&customer.TaxID,
+		&customer.Version,
 		&customer.IsActive,
 		&customer.CreatedAt,
 		&customer.UpdatedAt,
@@ -132,7 +135,7 @@ func (r *Repository) getByColumn(ctx context.Context, column, value string) (*Cu
 
 func (r *Repository) List(ctx context.Context, filter CustomerFilter) ([]Customer, error) {
 	query := `
-		SELECT id, code, name, phone, email, address, tax_id, is_active, created_at, updated_at, deleted_at
+			SELECT id, code, name, phone, email, address, tax_id, version, is_active, created_at, updated_at, deleted_at
 		FROM customers
 		WHERE deleted_at IS NULL
 	`
@@ -173,6 +176,7 @@ func (r *Repository) List(ctx context.Context, filter CustomerFilter) ([]Custome
 			&customer.Email,
 			&customer.Address,
 			&customer.TaxID,
+			&customer.Version,
 			&customer.IsActive,
 			&customer.CreatedAt,
 			&customer.UpdatedAt,
@@ -191,9 +195,9 @@ func (r *Repository) List(ctx context.Context, filter CustomerFilter) ([]Custome
 func (r *Repository) Update(ctx context.Context, customer *Customer) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE customers
-		SET code = $1, name = $2, phone = $3, email = $4, address = $5, tax_id = $6, is_active = $7, updated_at = NOW()
-		WHERE id = $8 AND deleted_at IS NULL
-	`, customer.Code, customer.Name, customer.Phone, customer.Email, customer.Address, customer.TaxID, customer.IsActive, customer.ID)
+				SET code = $1, name = $2, phone = $3, email = $4, address = $5, tax_id = $6, is_active = $7, version = version + 1, updated_at = NOW()
+				WHERE id = $8 AND version = $9 AND deleted_at IS NULL
+		`, customer.Code, customer.Name, customer.Phone, customer.Email, customer.Address, customer.TaxID, customer.IsActive, customer.ID, customer.Version)
 	if err != nil {
 		return err
 	}
@@ -207,12 +211,18 @@ func (r *Repository) Update(ctx context.Context, customer *Customer) error {
 	return nil
 }
 
+func (r *Repository) GetVersionStateWithTx(ctx context.Context, tx *sql.Tx, id int64) (int64, error) {
+	var version int64
+	err := tx.QueryRowContext(ctx, `SELECT version FROM customers WHERE id = $1 FOR UPDATE`, id).Scan(&version)
+	return version, err
+}
+
 func (r *Repository) UpdateWithTx(ctx context.Context, tx *sql.Tx, customer *Customer) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE customers
-		SET code = $1, name = $2, phone = $3, email = $4, address = $5, tax_id = $6, is_active = $7, updated_at = NOW()
-		WHERE id = $8 AND deleted_at IS NULL
-	`, customer.Code, customer.Name, customer.Phone, customer.Email, customer.Address, customer.TaxID, customer.IsActive, customer.ID)
+		SET code = $1, name = $2, phone = $3, email = $4, address = $5, tax_id = $6, is_active = $7, version = version + 1, updated_at = NOW()
+		WHERE id = $8 AND version = $9 AND deleted_at IS NULL
+	`, customer.Code, customer.Name, customer.Phone, customer.Email, customer.Address, customer.TaxID, customer.IsActive, customer.ID, customer.Version)
 	if err != nil {
 		return err
 	}

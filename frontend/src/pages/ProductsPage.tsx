@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import type { Product, ProductFilter } from '../types/product'
-import { productsApi } from '../services/products'
+import { productsApi, type ProductUpdatePayload } from '../services/products'
 import { categoriesApi } from '../services/categories'
 import type { ProductCategory } from '../types/category'
 import { readStoredAccessToken } from '../services/authSession'
@@ -80,11 +80,18 @@ export function ProductsPage() {
     if (!editing) return
     setSubmitting(true)
     try {
-      await productsApi.update(editing.id, payload, token)
+      const updatePayload: ProductUpdatePayload = { ...payload, expected_version: editing.version }
+      await productsApi.update(editing.id, updatePayload, token)
       setEditing(null)
       await load()
     } catch (err) {
       const e = err as ApiError
+      if (e instanceof ApiError && e.status === 409) {
+        setEditing(null)
+        setError('This product was changed by someone else. The latest data has been loaded.')
+        await load()
+        return
+      }
       throw e
     } finally {
       setSubmitting(false)

@@ -63,7 +63,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     const persistedAllowed = persisted ? branches.some((branch) => branch.id === persisted.id) : false
 
     if (isSuperAdmin) {
-      const nextSelection = persistedAllowed ? persisted : { id: -1, name: 'All Branches', code: 'ALL' }
+      const nextSelection = persistedAllowed ? persisted : { id: -1, name: 'All Branches', code: 'ALL', version: 1 }
       setSelectedBranch(nextSelection)
       persistSelectedBranch(nextSelection)
       return
@@ -76,8 +76,8 @@ export function BranchProvider({ children }: { children: ReactNode }) {
 
   const selectBranch = useCallback((branch: Branch | null) => {
     if (branch === null && isSuperAdmin) {
-      setSelectedBranch({ id: -1, name: 'All Branches', code: 'ALL' })
-      persistSelectedBranch({ id: -1, name: 'All Branches', code: 'ALL' })
+      setSelectedBranch({ id: -1, name: 'All Branches', code: 'ALL', version: 1 })
+      persistSelectedBranch({ id: -1, name: 'All Branches', code: 'ALL', version: 1 })
       return
     }
 

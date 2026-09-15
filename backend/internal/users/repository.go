@@ -33,10 +33,10 @@ func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, user *User) (
 
 func (r *Repository) UpdateWithTx(ctx context.Context, tx *sql.Tx, user *User) error {
 	res, err := tx.ExecContext(ctx, `
-        UPDATE users
-		SET email = $1, password_hash = $2, name = $3, updated_at = NOW()
-		WHERE id = $4
-	`, user.Email, user.PasswordHash, user.Name, user.ID)
+				UPDATE users
+		SET email = $1, password_hash = $2, name = $3, version = version + 1, updated_at = NOW()
+		WHERE id = $4 AND version = $5
+	`, user.Email, user.PasswordHash, user.Name, user.ID, user.Version)
 	if err != nil {
 		return err
 	}
@@ -48,6 +48,12 @@ func (r *Repository) UpdateWithTx(ctx context.Context, tx *sql.Tx, user *User) e
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (r *Repository) GetVersionStateWithTx(ctx context.Context, tx *sql.Tx, id int64) (int64, error) {
+	var version int64
+	err := tx.QueryRowContext(ctx, `SELECT version FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&version)
+	return version, err
 }
 
 func (r *Repository) AddRoleWithTx(ctx context.Context, tx *sql.Tx, userID, roleID int64) error {
@@ -81,7 +87,7 @@ func (r *Repository) DeleteBranchesWithTx(ctx context.Context, tx *sql.Tx, userI
 func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
 	user := &User{}
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, email, password_hash, name, created_at, updated_at
+				SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE email = $1
     `, email).Scan(
@@ -89,6 +95,7 @@ func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error
 		&user.Email,
 		&user.PasswordHash,
 		&user.Name,
+		&user.Version,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -101,7 +108,7 @@ func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error
 func (r *Repository) GetByID(ctx context.Context, id int64) (*User, error) {
 	user := &User{}
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, email, password_hash, name, created_at, updated_at
+				SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE id = $1
     `, id).Scan(
@@ -109,6 +116,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*User, error) {
 		&user.Email,
 		&user.PasswordHash,
 		&user.Name,
+		&user.Version,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -133,7 +141,7 @@ func (r *Repository) Create(ctx context.Context, user *User) (int64, error) {
 
 func (r *Repository) List(ctx context.Context, filter UserFilter) ([]User, error) {
 	query := `
-		SELECT id, email, password_hash, name, created_at, updated_at
+				SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
     `
 	args := []interface{}{}
@@ -162,6 +170,7 @@ func (r *Repository) List(ctx context.Context, filter UserFilter) ([]User, error
 			&user.Email,
 			&user.PasswordHash,
 			&user.Name,
+			&user.Version,
 			&user.CreatedAt,
 			&user.UpdatedAt,
 		); err != nil {
@@ -177,7 +186,7 @@ func (r *Repository) List(ctx context.Context, filter UserFilter) ([]User, error
 
 func (r *Repository) ListByBranch(ctx context.Context, branchID int64) ([]User, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT u.id, u.email, u.password_hash, u.name, u.created_at, u.updated_at
+				SELECT u.id, u.email, u.password_hash, u.name, u.version, u.created_at, u.updated_at
         FROM users u
         JOIN user_branches ub ON ub.user_id = u.id
         WHERE ub.branch_id = $1
@@ -196,6 +205,7 @@ func (r *Repository) ListByBranch(ctx context.Context, branchID int64) ([]User, 
 			&user.Email,
 			&user.PasswordHash,
 			&user.Name,
+			&user.Version,
 			&user.CreatedAt,
 			&user.UpdatedAt,
 		); err != nil {
@@ -211,7 +221,7 @@ func (r *Repository) ListByBranch(ctx context.Context, branchID int64) ([]User, 
 
 func (r *Repository) ListAccessible(ctx context.Context, filter UserFilter, actorID int64) ([]User, error) {
 	query := `
-		SELECT DISTINCT u.id, u.email, u.password_hash, u.name, u.is_active, u.created_at, u.updated_at
+			SELECT DISTINCT u.id, u.email, u.password_hash, u.name, u.version, u.is_active, u.created_at, u.updated_at
 		FROM users u
 		JOIN user_branches ub ON ub.user_id = u.id
 		JOIN user_branches actor_branch ON actor_branch.branch_id = ub.branch_id AND actor_branch.user_id = $1
@@ -230,7 +240,7 @@ func (r *Repository) ListAccessible(ctx context.Context, filter UserFilter, acto
 	var users []User
 	for rows.Next() {
 		var user User
-		if err := rows.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.CreatedAt, &user.UpdatedAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Version, &user.IsActive, &user.CreatedAt, &user.UpdatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, user)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"testing"
 
 	"erp-system/backend/internal/audit"
@@ -134,11 +135,13 @@ type fakeInventoryRepo struct {
 	movementCreated   bool
 	movementErr       error
 	movements         []inventory.StockMovement
+	lockOrder         []int64
 	createErrSequence []error
 	createAttempts    int
 }
 
 func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error) {
+	r.lockOrder = append(r.lockOrder, productID)
 	if r.getInventoryErr != nil {
 		return nil, r.getInventoryErr
 	}
@@ -148,9 +151,45 @@ func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, 
 	return r.inventory, nil
 }
 
+func TestReceivePurchase_LocksInventoryInProductOrder(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := &fakePurchaseRepo{
+		db:             db,
+		purchase:       &Purchase{ID: 42, BranchID: 1, Status: PurchaseStatusOrdered},
+		purchaseItems:  []PurchaseItem{{ID: 20, PurchaseID: 42, ProductID: 20, Quantity: 1}, {ID: 10, PurchaseID: 42, ProductID: 10, Quantity: 1}},
+		nextPurchaseID: 42,
+	}
+	inv := &fakeInventoryRepo{inventory: &inventory.Inventory{ID: 1, BranchID: 1, Quantity: 5}}
+	service := NewService(repo, inv, &fakeProductService{product: &products.Product{ID: 10, IsActive: true}}, &fakeBranchService{}, &fakeAuthChecker{allowed: true}, nil)
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	_, err = service.ReceivePurchase(auth.ContextWithUserID(context.Background(), 7), 42, ReceivePurchaseInput{Items: []ReceivePurchaseItemInput{
+		{PurchaseItemID: 20, Quantity: 1},
+		{PurchaseItemID: 10, Quantity: 1},
+	}})
+	if err != nil {
+		t.Fatalf("receipt failed: %v", err)
+	}
+	if got, want := inv.lockOrder, []int64{10, 20}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected inventory locks in product order %v, got %v", want, got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func (r *fakeInventoryRepo) EnsureInventoryWithTx(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error) {
+	if r.getInventoryErr != nil {
+		return nil, r.getInventoryErr
+	}
 	if r.inventory == nil {
 		r.inventory = &inventory.Inventory{ID: 1, ProductID: productID, BranchID: branchID}
+		r.created = true
 	}
 	return r.inventory, nil
 }

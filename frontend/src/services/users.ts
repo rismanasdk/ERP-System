@@ -3,6 +3,8 @@ import type { User } from '../types/auth'
 import { api } from '../lib/api'
 import { readStoredAccessToken } from './authSession'
 
+export type UserUpdatePayload = Partial<User> & { expected_version: number; password?: string; branch_ids?: number[] }
+
 export const usersApi = {
   list: async (token?: string): Promise<User[]> => {
     const t = token ?? readStoredAccessToken() ?? undefined
@@ -22,7 +24,7 @@ export const usersApi = {
     return res.data
   },
 
-  update: async (id: number, payload: Partial<User> & { password?: string; branch_ids?: number[] }, token?: string): Promise<User> => {
+  update: async (id: number, payload: UserUpdatePayload, token?: string): Promise<User> => {
     const t = token ?? readStoredAccessToken() ?? undefined
     const res = await api.put<ApiEnvelope<User>>(`/api/v1/users/${id}`, payload, t)
     return res.data

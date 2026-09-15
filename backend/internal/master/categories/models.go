@@ -8,6 +8,7 @@ type Category struct {
 	Description  *string   `json:"description,omitempty"`
 	IsActive     bool      `json:"is_active"`
 	ProductCount int       `json:"product_count"`
+	Version      int64     `json:"version"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
