@@ -164,6 +164,7 @@ func main() {
 	router.Handle("/api/v1/reports/sales", authMiddleware.Authenticate(authMiddleware.RequirePermission(reporting.ReportReadPermission)(http.HandlerFunc(reportingHandler.SalesReport)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/reports/purchases", authMiddleware.Authenticate(authMiddleware.RequirePermission(reporting.ReportReadPermission)(http.HandlerFunc(reportingHandler.PurchasesReport)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/reports/inventory", authMiddleware.Authenticate(authMiddleware.RequirePermission(reporting.ReportReadPermission)(http.HandlerFunc(reportingHandler.InventoryReport)))).Methods(http.MethodGet)
+	router.Handle("/api/v1/reports/payments", authMiddleware.Authenticate(authMiddleware.RequirePermission(reporting.ReportReadPermission)(http.HandlerFunc(reportingHandler.PaymentReport)))).Methods(http.MethodGet)
 	router.Handle("/api/v1/reports/profit", authMiddleware.Authenticate(authMiddleware.RequirePermission(reporting.ReportReadPermission)(http.HandlerFunc(reportingHandler.ProfitReport)))).Methods(http.MethodGet)
 	registerInventoryRoutes(router, authMiddleware, inventoryHandler)
 	registerPurchasingRoutes(router, authMiddleware, purchaseHandler)

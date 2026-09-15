@@ -14,6 +14,7 @@ type fakeReportingRepo struct {
 	salesReport     *SalesReport
 	purchasesReport *PurchasesReport
 	inventoryReport *InventoryReport
+	paymentReport   *PaymentReport
 	profitReport    *ProfitReport
 	err             error
 }
@@ -37,6 +38,13 @@ func (f *fakeReportingRepo) GetInventoryReport(ctx context.Context, branchIDs []
 		return nil, f.err
 	}
 	return f.inventoryReport, nil
+}
+
+func (f *fakeReportingRepo) GetPaymentReport(ctx context.Context, startDate, endDate *time.Time, branchIDs []int64, paymentMethod *string) (*PaymentReport, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.paymentReport, nil
 }
 
 func (f *fakeReportingRepo) GetProfitReport(ctx context.Context, startDate, endDate *time.Time, branchIDs []int64) (*ProfitReport, error) {
@@ -152,5 +160,20 @@ func TestReportingService_ValidRangeAndOptionalFilters(t *testing.T) {
 	}
 	if report.TotalInventoryRecords != 6 || report.TotalQuantity != 42 {
 		t.Fatalf("unexpected inventory report: %+v", report)
+	}
+}
+
+func TestReportingService_PaymentReportBranchAndMethodFilters(t *testing.T) {
+	ctx := auth.ContextWithUserID(context.Background(), 10)
+	repo := &fakeReportingRepo{paymentReport: &PaymentReport{TotalPayments: 3, TotalPaymentAmount: 2400}}
+	svc := NewService(repo, &fakeReportingBranchService{branches: []branches.Branch{{ID: 5, IsActive: true}}}, &fakeReportingPermissionChecker{allowed: true}, &fakeReportingIdentityProvider{})
+	branchID := int64(5)
+	method := "CASH"
+	report, err := svc.GetPaymentReport(ctx, "2026-01-01", "2026-01-31", &branchID, &method)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report.TotalPayments != 3 || report.TotalPaymentAmount != 2400 {
+		t.Fatalf("unexpected payment report: %+v", report)
 	}
 }
