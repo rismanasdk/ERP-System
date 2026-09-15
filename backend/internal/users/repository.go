@@ -255,6 +255,11 @@ func (r *Repository) SetActiveStatus(ctx context.Context, userID int64, active b
 	return err
 }
 
+func (r *Repository) SetActiveStatusWithTx(ctx context.Context, tx *sql.Tx, userID int64, active bool) error {
+	_, err := tx.ExecContext(ctx, `UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2`, active, userID)
+	return err
+}
+
 func (r *Repository) GetRoleNames(ctx context.Context, userID int64) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx, `
         SELECT r.name

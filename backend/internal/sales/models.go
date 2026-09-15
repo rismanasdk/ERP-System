@@ -76,6 +76,7 @@ type SaleFulfillment struct {
 type SaleFulfillmentItem struct {
 	ID                int64 `json:"id"`
 	FulfillmentID     int64 `json:"sales_fulfillment_id"`
+	SalesOrderID      int64 `json:"-"`
 	SaleItemID        int64 `json:"sales_order_item_id"`
 	ProductID         int64 `json:"product_id"`
 	QuantityFulfilled int64 `json:"quantity_fulfilled"`

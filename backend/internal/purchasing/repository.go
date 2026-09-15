@@ -500,9 +500,9 @@ func (r *Repository) CreateReceiptWithTx(ctx context.Context, tx *sql.Tx, receip
 func (r *Repository) CreateReceiptItemWithTx(ctx context.Context, tx *sql.Tx, item *PurchaseReceiptItem) (int64, error) {
 	var id int64
 	err := tx.QueryRowContext(ctx, `
-        INSERT INTO purchase_receipt_items (purchase_receipt_id, purchase_order_item_id, product_id, quantity_received)
-        VALUES ($1, $2, $3, $4) RETURNING id
-    `, item.ReceiptID, item.PurchaseItemID, item.ProductID, item.QuantityReceived).Scan(&id)
+		INSERT INTO purchase_receipt_items (purchase_receipt_id, purchase_order_id, purchase_order_item_id, product_id, quantity_received)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id
+	`, item.ReceiptID, item.PurchaseOrderID, item.PurchaseItemID, item.ProductID, item.QuantityReceived).Scan(&id)
 	return id, err
 }
 
