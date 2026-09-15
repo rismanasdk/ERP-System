@@ -20,6 +20,7 @@ type RepositoryInterface interface {
 	GetSalesReport(ctx context.Context, startDate, endDate *time.Time, branchIDs []int64) (*SalesReport, error)
 	GetPurchasesReport(ctx context.Context, startDate, endDate *time.Time, branchIDs []int64) (*PurchasesReport, error)
 	GetInventoryReport(ctx context.Context, branchIDs []int64, productID *int64) (*InventoryReport, error)
+	GetPaymentReport(ctx context.Context, startDate, endDate *time.Time, branchIDs []int64, paymentMethod *string) (*PaymentReport, error)
 	GetProfitReport(ctx context.Context, startDate, endDate *time.Time, branchIDs []int64) (*ProfitReport, error)
 }
 
@@ -102,6 +103,27 @@ func (s *Service) GetInventoryReport(ctx context.Context, branchID *int64, produ
 		return nil, err
 	}
 	return s.repo.GetInventoryReport(ctx, branchIDs, productID)
+}
+
+func (s *Service) GetPaymentReport(ctx context.Context, startDateRaw, endDateRaw string, branchID *int64, paymentMethod *string) (*PaymentReport, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return nil, ErrAuthenticationRequired
+	}
+	if allowed, err := s.authChecker.HasPermission(ctx, userID, ReportReadPermission); err != nil {
+		return nil, err
+	} else if !allowed {
+		return nil, ErrForbidden
+	}
+	startDate, endDate, err := parseDateRange(startDateRaw, endDateRaw)
+	if err != nil {
+		return nil, err
+	}
+	branchIDs, err := s.resolveBranchScope(ctx, userID, branchID)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.GetPaymentReport(ctx, startDate, endDate, branchIDs, paymentMethod)
 }
 
 func (s *Service) GetProfitReport(ctx context.Context, startDateRaw, endDateRaw string, branchID *int64) (*ProfitReport, error) {

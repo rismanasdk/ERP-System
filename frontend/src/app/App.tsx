@@ -14,7 +14,7 @@ import { SuppliersPage } from '../pages/SuppliersPage'
 import { PurchasesPage } from '../pages/PurchasesPage'
 import { InventoryPage } from '../pages/InventoryPage'
 import { SalesPage } from '../pages/SalesPage'
-import { SalesReportPage } from '../pages/SalesReportPage'
+import { ReportsPage } from '../pages/ReportsPage'
 import { OrganizationPage } from '../pages/OrganizationPage'
 import { UsersPage } from '../pages/UsersPage'
 import { RolesPage } from '../pages/RolesPage'
@@ -50,7 +50,7 @@ function AppRoutes() {
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/purchasing" element={<PurchasesPage />} />
         <Route path="/sales" element={<SalesPage />} />
-        <Route path="/reports" element={<SalesReportPage />} />
+        <Route path="/reports" element={<ReportsPage />} />
         <Route path="/app/products" element={<ProductsPage />} />
         <Route path="/app/product-categories" element={<ProductCategoriesPage />} />
         <Route path="/app/organization" element={<OrganizationPage />} />
@@ -63,7 +63,7 @@ function AppRoutes() {
         <Route path="/app/inventory" element={<InventoryPage />} />
         <Route path="/app/purchasing" element={<PurchasesPage />} />
         <Route path="/app/sales" element={<SalesPage />} />
-        <Route path="/app/reports" element={<SalesReportPage />} />
+        <Route path="/app/reports" element={<ReportsPage />} />
       </Route>
       <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
     </Routes>

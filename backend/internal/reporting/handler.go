@@ -16,6 +16,7 @@ type ServiceInterface interface {
 	GetSalesReport(ctx context.Context, startDateRaw, endDateRaw string, branchID *int64) (*SalesReport, error)
 	GetPurchasesReport(ctx context.Context, startDateRaw, endDateRaw string, branchID *int64) (*PurchasesReport, error)
 	GetInventoryReport(ctx context.Context, branchID *int64, productID *int64) (*InventoryReport, error)
+	GetPaymentReport(ctx context.Context, startDateRaw, endDateRaw string, branchID *int64, paymentMethod *string) (*PaymentReport, error)
 	GetProfitReport(ctx context.Context, startDateRaw, endDateRaw string, branchID *int64) (*ProfitReport, error)
 }
 
@@ -71,6 +72,30 @@ func (h *Handler) InventoryReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	report, err := h.service.GetInventoryReport(r.Context(), branchID, productID)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+	response.JSONOK(w, report)
+}
+
+func (h *Handler) PaymentReport(w http.ResponseWriter, r *http.Request) {
+	startDate := strings.TrimSpace(r.URL.Query().Get("start_date"))
+	endDate := strings.TrimSpace(r.URL.Query().Get("end_date"))
+	branchID, err := parseOptionalInt64(r.URL.Query().Get("branch_id"))
+	if err != nil {
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "invalid branch_id"))
+		return
+	}
+	paymentMethod := strings.TrimSpace(r.URL.Query().Get("payment_method"))
+	if paymentMethod == "" {
+		paymentMethod = ""
+	}
+	var paymentMethodPtr *string
+	if paymentMethod != "" {
+		paymentMethodPtr = &paymentMethod
+	}
+	report, err := h.service.GetPaymentReport(r.Context(), startDate, endDate, branchID, paymentMethodPtr)
 	if err != nil {
 		handleServiceError(w, err)
 		return

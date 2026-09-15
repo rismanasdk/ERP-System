@@ -16,6 +16,7 @@ type fakeReportingHandlerService struct {
 	salesReport     *SalesReport
 	purchasesReport *PurchasesReport
 	inventoryReport *InventoryReport
+	paymentReport   *PaymentReport
 	profitReport    *ProfitReport
 	err             error
 }
@@ -39,6 +40,13 @@ func (f *fakeReportingHandlerService) GetInventoryReport(ctx context.Context, br
 		return nil, f.err
 	}
 	return f.inventoryReport, nil
+}
+
+func (f *fakeReportingHandlerService) GetPaymentReport(ctx context.Context, startDateRaw, endDateRaw string, branchID *int64, paymentMethod *string) (*PaymentReport, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.paymentReport, nil
 }
 
 func (f *fakeReportingHandlerService) GetProfitReport(ctx context.Context, startDateRaw, endDateRaw string, branchID *int64) (*ProfitReport, error) {

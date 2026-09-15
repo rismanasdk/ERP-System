@@ -381,6 +381,134 @@ func (r *Repository) GetInventoryReport(ctx context.Context, branchIDs []int64, 
 	return &report, nil
 }
 
+func (r *Repository) GetPaymentReport(ctx context.Context, startDate, endDate *time.Time, branchIDs []int64, paymentMethod *string) (*PaymentReport, error) {
+	report := &PaymentReport{MethodBreakdown: map[string]int64{}, MethodTotalBreakdown: map[string]float64{}, StatusSummary: map[string]int64{}}
+
+	baseQuery := `
+		SELECT COALESCE(COUNT(*), 0), COALESCE(SUM(sp.amount), 0)
+		FROM sales_payments sp
+		JOIN sales s ON s.id = sp.sales_order_id
+	`
+	args := []any{}
+	clauses := []string{}
+	if startDate != nil {
+		clauses = append(clauses, fmt.Sprintf("sp.paid_at >= $%d", len(args)+1))
+		args = append(args, *startDate)
+	}
+	if endDate != nil {
+		clauses = append(clauses, fmt.Sprintf("sp.paid_at < $%d", len(args)+1))
+		args = append(args, *endDate)
+	}
+	if len(branchIDs) > 0 {
+		clauses = append(clauses, fmt.Sprintf("s.branch_id = ANY($%d)", len(args)+1))
+		args = append(args, pq.Array(branchIDs))
+	}
+	if paymentMethod != nil && strings.TrimSpace(*paymentMethod) != "" {
+		clauses = append(clauses, fmt.Sprintf("sp.payment_method = $%d", len(args)+1))
+		args = append(args, strings.TrimSpace(*paymentMethod))
+	}
+	if len(clauses) > 0 {
+		baseQuery += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	if err := r.db.QueryRowContext(ctx, baseQuery, args...).Scan(&report.TotalPayments, &report.TotalPaymentAmount); err != nil {
+		return nil, err
+	}
+
+	methodQuery := `
+		SELECT sp.payment_method, COUNT(*), COALESCE(SUM(sp.amount), 0)
+		FROM sales_payments sp
+		JOIN sales s ON s.id = sp.sales_order_id
+	`
+	methodArgs := []any{}
+	methodClauses := []string{}
+	if startDate != nil {
+		methodClauses = append(methodClauses, fmt.Sprintf("sp.paid_at >= $%d", len(methodArgs)+1))
+		methodArgs = append(methodArgs, *startDate)
+	}
+	if endDate != nil {
+		methodClauses = append(methodClauses, fmt.Sprintf("sp.paid_at < $%d", len(methodArgs)+1))
+		methodArgs = append(methodArgs, *endDate)
+	}
+	if len(branchIDs) > 0 {
+		methodClauses = append(methodClauses, fmt.Sprintf("s.branch_id = ANY($%d)", len(methodArgs)+1))
+		methodArgs = append(methodArgs, pq.Array(branchIDs))
+	}
+	if paymentMethod != nil && strings.TrimSpace(*paymentMethod) != "" {
+		methodClauses = append(methodClauses, fmt.Sprintf("sp.payment_method = $%d", len(methodArgs)+1))
+		methodArgs = append(methodArgs, strings.TrimSpace(*paymentMethod))
+	}
+	if len(methodClauses) > 0 {
+		methodQuery += " WHERE " + strings.Join(methodClauses, " AND ")
+	}
+	methodQuery += " GROUP BY sp.payment_method ORDER BY sp.payment_method"
+	methodRows, err := r.db.QueryContext(ctx, methodQuery, methodArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer methodRows.Close()
+	for methodRows.Next() {
+		var method string
+		var count int64
+		var total float64
+		if err := methodRows.Scan(&method, &count, &total); err != nil {
+			return nil, err
+		}
+		report.MethodBreakdown[method] = count
+		report.MethodTotalBreakdown[method] = total
+	}
+	if err := methodRows.Err(); err != nil {
+		return nil, err
+	}
+
+	rowQuery := `
+		SELECT sp.id, s.sale_number, sp.amount, sp.payment_method, COALESCE(sp.reference_number, ''), sp.paid_at, sp.created_by
+		FROM sales_payments sp
+		JOIN sales s ON s.id = sp.sales_order_id
+	`
+	rowArgs := []any{}
+	rowClauses := []string{}
+	if startDate != nil {
+		rowClauses = append(rowClauses, fmt.Sprintf("sp.paid_at >= $%d", len(rowArgs)+1))
+		rowArgs = append(rowArgs, *startDate)
+	}
+	if endDate != nil {
+		rowClauses = append(rowClauses, fmt.Sprintf("sp.paid_at < $%d", len(rowArgs)+1))
+		rowArgs = append(rowArgs, *endDate)
+	}
+	if len(branchIDs) > 0 {
+		rowClauses = append(rowClauses, fmt.Sprintf("s.branch_id = ANY($%d)", len(rowArgs)+1))
+		rowArgs = append(rowArgs, pq.Array(branchIDs))
+	}
+	if paymentMethod != nil && strings.TrimSpace(*paymentMethod) != "" {
+		rowClauses = append(rowClauses, fmt.Sprintf("sp.payment_method = $%d", len(rowArgs)+1))
+		rowArgs = append(rowArgs, strings.TrimSpace(*paymentMethod))
+	}
+	if len(rowClauses) > 0 {
+		rowQuery += " WHERE " + strings.Join(rowClauses, " AND ")
+	}
+	rowQuery += " ORDER BY sp.paid_at DESC, sp.id DESC"
+	rows, err := r.db.QueryContext(ctx, rowQuery, rowArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row PaymentReportRow
+		var reference string
+		if err := rows.Scan(&row.ID, &row.SaleNumber, &row.Amount, &row.PaymentMethod, &reference, &row.PaidAt, &row.CreatedBy); err != nil {
+			return nil, err
+		}
+		if reference != "" {
+			row.ReferenceNumber = reference
+		}
+		report.Rows = append(report.Rows, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
 func (r *Repository) GetProfitReport(ctx context.Context, startDate, endDate *time.Time, branchIDs []int64) (*ProfitReport, error) {
 	report := &ProfitReport{}
 
