@@ -1,5 +1,6 @@
 export type User = {
   id: number
+  version: number
   email: string
   name?: string
   roles?: string[]
@@ -28,6 +29,7 @@ export type Branch = {
   id: number
   name: string
   code: string
+  version: number
   is_active?: boolean
   created_at?: string
   updated_at?: string

@@ -5,6 +5,7 @@ import "time"
 type Supplier struct {
 	ID        int64      `json:"id"`
 	Code      string     `json:"code"`
+	Version   int64      `json:"version"`
 	Name      string     `json:"name"`
 	Phone     *string    `json:"phone,omitempty"`
 	Email     *string    `json:"email,omitempty"`

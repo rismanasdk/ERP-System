@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import type { Supplier, SupplierFilter } from '../types/supplier'
-import { suppliersApi } from '../services/suppliers'
+import { suppliersApi, type SupplierUpdatePayload } from '../services/suppliers'
 import { readStoredAccessToken } from '../services/authSession'
 import { SupplierForm } from '../components/suppliers/SupplierForm'
 import { ApiError } from '../lib/api'
@@ -88,11 +88,18 @@ export function SuppliersPage() {
     if (!editing) return
     setSubmitting(true)
     try {
-      await suppliersApi.update(editing.id, payload, token)
+      const updatePayload: SupplierUpdatePayload = { ...payload, expected_version: editing.version }
+      await suppliersApi.update(editing.id, updatePayload, token)
       setEditing(null)
       await load()
     } catch (err) {
       const e = err as ApiError
+      if (e instanceof ApiError && e.status === 409) {
+        setEditing(null)
+        setError('This supplier was changed by someone else. The latest data has been loaded.')
+        await load()
+        return
+      }
       setError(e.message)
       return
     } finally {

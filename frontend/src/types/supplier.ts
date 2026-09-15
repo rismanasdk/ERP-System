@@ -2,6 +2,7 @@ export type Supplier = {
   id: number
   code: string
   name: string
+  version: number
   phone?: string | null
   email?: string | null
   address?: string | null

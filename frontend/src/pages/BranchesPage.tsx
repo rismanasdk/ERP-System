@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import type { Branch } from '../types/auth'
-import { branchesApi } from '../services/branches'
+import { branchesApi, type BranchUpdatePayload } from '../services/branches'
 import { readStoredAccessToken } from '../services/authSession'
 import { BranchForm } from '../components/branches/BranchForm'
 import { ApiError } from '../lib/api'
@@ -90,11 +90,18 @@ export function BranchesPage() {
     if (!editing) return
     setSubmitting(true)
     try {
-      await branchesApi.update(editing.id, payload, token)
+      const updatePayload: BranchUpdatePayload = { ...payload, expected_version: editing.version }
+      await branchesApi.update(editing.id, updatePayload, token)
       setEditing(null)
       await load()
     } catch (err) {
       const e = err as ApiError
+      if (e instanceof ApiError && e.status === 409) {
+        setEditing(null)
+        setError('This branch was changed by someone else. The latest data has been loaded.')
+        await load()
+        return
+      }
       setError(e.message)
       return
     } finally {
@@ -116,7 +123,7 @@ export function BranchesPage() {
 
     setSubmitting(true)
     try {
-      await branchesApi.update(id, { name: branch.name, code: branch.code, is_active: false }, token)
+      await branchesApi.update(id, { name: branch.name, code: branch.code, is_active: false, expected_version: branch.version }, token)
       await load()
     } catch (err) {
       const e = err as ApiError

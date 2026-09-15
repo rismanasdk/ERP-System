@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -162,6 +163,7 @@ func (r *fakeSaleRepo) UpdateSaleStatusWithTx(ctx context.Context, tx *sql.Tx, i
 type fakeInventoryRepo struct {
 	mu          sync.Mutex
 	quantities  map[int64]int64
+	lockOrder   []int64
 	movements   []*inventory.StockMovement
 	updateErr   error
 	movementErr error
@@ -231,11 +233,50 @@ func TestFulfillSale_RejectsItemFromAnotherSale(t *testing.T) {
 func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.lockOrder = append(r.lockOrder, productID)
 	key := productID*100000 + branchID
 	if qty, ok := r.quantities[key]; ok {
 		return &inventory.Inventory{ID: key, ProductID: productID, BranchID: branchID, Quantity: qty}, nil
 	}
 	return nil, sql.ErrNoRows
+}
+
+func TestFulfillSale_LocksInventoryInProductOrder(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := newFakeSaleRepo()
+	repo.db = db
+	repo.sales[1] = &Sale{ID: 1, BranchID: 2, Status: SaleStatusConfirmed}
+	repo.itemsBySaleID[1] = []SaleItem{
+		{ID: 20, SaleID: 1, ProductID: 20, Quantity: 1},
+		{ID: 10, SaleID: 1, ProductID: 10, Quantity: 1},
+	}
+	inv := newFakeInventoryRepo()
+	inv.quantities[2000002] = 5
+	inv.quantities[1000002] = 5
+	service := NewService(repo, inv, &fakeProductService{products: map[int64]*products.Product{
+		10: {ID: 10, IsActive: true},
+		20: {ID: 20, IsActive: true},
+	}}, &fakeBranchService{allowedBranches: []branches.Branch{{ID: 2, IsActive: true}}}, &fakeAuthChecker{allowed: true}, nil)
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	_, err = service.FulfillSale(auth.ContextWithUserID(context.Background(), 7), 1, FulfillSaleInput{Items: []FulfillSaleItemInput{
+		{SaleItemID: 20, Quantity: 1},
+		{SaleItemID: 10, Quantity: 1},
+	}})
+	if err != nil {
+		t.Fatalf("fulfillment failed: %v", err)
+	}
+	if got, want := inv.lockOrder, []int64{10, 20}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected inventory locks in product order %v, got %v", want, got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
 }
 
 func (r *fakeInventoryRepo) UpdateQuantityWithTx(ctx context.Context, tx *sql.Tx, id, quantity int64) error {

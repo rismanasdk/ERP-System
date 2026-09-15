@@ -37,7 +37,10 @@ type createSupplierRequest struct {
 	IsActive *bool   `json:"is_active,omitempty"`
 }
 
-type updateSupplierRequest = createSupplierRequest
+type updateSupplierRequest struct {
+	createSupplierRequest
+	ExpectedVersion int64 `json:"expected_version"`
+}
 
 type supplierResponse struct {
 	Supplier *Supplier `json:"supplier"`
@@ -135,6 +138,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Phone:    req.Phone,
 		Email:    req.Email,
 		Address:  req.Address,
+		Version:  req.ExpectedVersion,
 		IsActive: true,
 	}
 	if req.IsActive != nil {
@@ -183,6 +187,10 @@ func handleServiceError(w http.ResponseWriter, err error, message string) {
 		response.JSONError(w, http.StatusNotFound, response.NewAPIError(http.StatusNotFound, "NOT_FOUND", "supplier not found"))
 	case errors.Is(err, ErrSupplierDuplicateCode):
 		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", "supplier code already exists"))
+	case errors.Is(err, ErrSupplierVersionConflict):
+		response.JSONError(w, http.StatusConflict, response.NewAPIError(http.StatusConflict, "CONFLICT", err.Error()))
+	case errors.Is(err, ErrSupplierVersionRequired):
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	default:
 		var validationErr *ValidationError
 		if errors.As(err, &validationErr) {

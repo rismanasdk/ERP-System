@@ -19,6 +19,7 @@ type repository interface {
 	List(ctx context.Context, filter BranchFilter) ([]Branch, error)
 	ListAccessibleBranches(ctx context.Context, filter BranchFilter, userID int64) ([]Branch, error)
 	UpdateWithTx(ctx context.Context, tx *sql.Tx, branch *Branch) error
+	GetVersionStateWithTx(ctx context.Context, tx *sql.Tx, id int64) (int64, error)
 	AssignUserBranchWithTx(ctx context.Context, tx *sql.Tx, userID, branchID int64) error
 	UserHasAccess(ctx context.Context, userID, branchID int64) (bool, error)
 }
@@ -34,12 +35,14 @@ func NewService(repo repository, identityProvider auth.IdentityProvider, auditSv
 }
 
 var (
-	ErrBranchNotFound      = errors.New("branch not found")
-	ErrBranchCodeDuplicate = errors.New("branch code already exists")
-	ErrBranchNameRequired  = errors.New("branch name is required")
-	ErrBranchCodeRequired  = errors.New("branch code is required")
-	ErrBranchAccessDenied  = errors.New("branch access denied")
-	ErrBranchInactive      = errors.New("branch is inactive")
+	ErrBranchNotFound        = errors.New("branch not found")
+	ErrBranchCodeDuplicate   = errors.New("branch code already exists")
+	ErrBranchNameRequired    = errors.New("branch name is required")
+	ErrBranchCodeRequired    = errors.New("branch code is required")
+	ErrBranchAccessDenied    = errors.New("branch access denied")
+	ErrBranchInactive        = errors.New("branch is inactive")
+	ErrBranchVersionConflict = errors.New("branch was modified by another request")
+	ErrBranchVersionRequired = errors.New("expected_version must be greater than zero")
 )
 
 func (s *Service) Create(ctx context.Context, branch *Branch) (int64, error) {
@@ -173,6 +176,9 @@ func (s *Service) isSuperAdmin(ctx context.Context, userID int64) (bool, error) 
 }
 
 func (s *Service) Update(ctx context.Context, branch *Branch) error {
+	if branch.Version <= 0 {
+		return ErrBranchVersionRequired
+	}
 	existing, err := s.repo.GetByID(ctx, branch.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -209,9 +215,14 @@ func (s *Service) Update(ctx context.Context, branch *Branch) error {
 		}
 	}()
 
-	if err := s.repo.UpdateWithTx(ctx, tx, branch); err != nil {
+	if err = s.repo.UpdateWithTx(ctx, tx, branch); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrBranchNotFound
+			if _, stateErr := s.repo.GetVersionStateWithTx(ctx, tx, branch.ID); errors.Is(stateErr, sql.ErrNoRows) {
+				return ErrBranchNotFound
+			} else if stateErr != nil {
+				return stateErr
+			}
+			err = ErrBranchVersionConflict
 		}
 		return err
 	}

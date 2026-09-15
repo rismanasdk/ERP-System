@@ -69,13 +69,13 @@ func main() {
 	}
 
 	userRepo := users.NewRepository(db)
-	roleRepo := roles.NewRepository(db)
 	permRepo := permissions.NewRepository(db)
 	auditRepo := audit.NewRepository(db)
 	auditService := audit.NewService(auditRepo)
+	roleRepo := roles.NewRepository(db, auditService)
 	roleHandler := roles.NewHandler(roleRepo)
 	categoryRepo := categories.NewRepository(db)
-	categoryService := categories.NewService(categoryRepo)
+	categoryService := categories.NewService(categoryRepo, auditService)
 	categoryHandler := categories.NewHandler(categoryService)
 	refreshRepo := auth.NewRefreshTokenRepository(db)
 	authService := auth.NewService(userRepo, roleRepo, permRepo, refreshRepo, auditService)

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"erp-system/backend/internal/audit"
@@ -440,6 +441,15 @@ func (s *Service) FulfillSale(ctx context.Context, saleID int64, input FulfillSa
 		}
 		seen[inputItem.SaleItemID] = true
 	}
+	orderedInputItems := append([]FulfillSaleItemInput(nil), input.Items...)
+	sort.SliceStable(orderedInputItems, func(i, j int) bool {
+		left := byID[orderedInputItems[i].SaleItemID]
+		right := byID[orderedInputItems[j].SaleItemID]
+		if left.ProductID != right.ProductID {
+			return left.ProductID < right.ProductID
+		}
+		return left.ID < right.ID
+	})
 	fulfillment := &SaleFulfillment{SaleID: saleID, BranchID: sale.BranchID, FulfilledBy: userID, Notes: input.Notes}
 	fulfillmentID, err = s.repo.CreateFulfillmentWithTx(ctx, tx, fulfillment)
 	if err != nil {
@@ -451,7 +461,7 @@ func (s *Service) FulfillSale(ctx context.Context, saleID int64, input FulfillSa
 			allFulfilled = false
 		}
 	}
-	for _, inputItem := range input.Items {
+	for _, inputItem := range orderedInputItems {
 		item := byID[inputItem.SaleItemID]
 		inv, invErr := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, sale.BranchID)
 		if invErr != nil {
@@ -775,6 +785,12 @@ func (s *Service) CompleteSale(ctx context.Context, saleID int64) (err error) {
 	if len(items) == 0 {
 		return ErrSaleHasNoItems
 	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].ProductID != items[j].ProductID {
+			return items[i].ProductID < items[j].ProductID
+		}
+		return items[i].ID < items[j].ID
+	})
 
 	for _, item := range items {
 		inventoryRow, err := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, sale.BranchID)
@@ -891,6 +907,12 @@ func (s *Service) CancelSale(ctx context.Context, saleID int64) (err error) {
 		if len(items) == 0 {
 			return ErrSaleHasNoItems
 		}
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].ProductID != items[j].ProductID {
+				return items[i].ProductID < items[j].ProductID
+			}
+			return items[i].ID < items[j].ID
+		})
 		for _, item := range items {
 			inventoryRow, err := s.inventoryRepo.GetByProductAndBranchForUpdate(ctx, tx, item.ProductID, sale.BranchID)
 			if err != nil {

@@ -45,6 +45,9 @@ func (r *fakeBranchRepo) ListAccessibleBranches(ctx context.Context, filter Bran
 func (r *fakeBranchRepo) UpdateWithTx(ctx context.Context, tx *sql.Tx, branch *Branch) error {
 	return errors.New("not implemented")
 }
+func (r *fakeBranchRepo) GetVersionStateWithTx(ctx context.Context, tx *sql.Tx, id int64) (int64, error) {
+	return 0, errors.New("not implemented")
+}
 func (r *fakeBranchRepo) AssignUserBranchWithTx(ctx context.Context, tx *sql.Tx, userID, branchID int64) error {
 	return errors.New("not implemented")
 }

@@ -31,7 +31,7 @@ func TestService_Create_RollsBackWhenActiveStatusUpdateFails(t *testing.T) {
 		WHERE ur.user_id = $1
 	`)).WithArgs(int64(99)).WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("SUPER_ADMIN"))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, email, password_hash, name, created_at, updated_at
+				SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE email = $1
     `)).WithArgs("atomic@example.com").WillReturnError(sql.ErrNoRows)
@@ -74,7 +74,7 @@ func TestService_Create_AssignsRolesAndBranchAccess(t *testing.T) {
 	branchIDs := []int64{7, 9}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT id, email, password_hash, name, created_at, updated_at
+				SELECT id, email, password_hash, name, version, created_at, updated_at
         FROM users
         WHERE email = $1
     `)).WithArgs("alice@example.com").WillReturnError(sql.ErrNoRows)

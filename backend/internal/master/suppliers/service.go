@@ -21,9 +21,11 @@ func NewService(repo *Repository, auditSvc *audit.Service) *Service {
 }
 
 var (
-	ErrSupplierNotFound      = errors.New("supplier not found")
-	ErrSupplierDeleted       = errors.New("supplier deleted")
-	ErrSupplierDuplicateCode = errors.New("supplier code already exists")
+	ErrSupplierNotFound        = errors.New("supplier not found")
+	ErrSupplierDeleted         = errors.New("supplier deleted")
+	ErrSupplierDuplicateCode   = errors.New("supplier code already exists")
+	ErrSupplierVersionConflict = errors.New("supplier was modified by another request")
+	ErrSupplierVersionRequired = errors.New("expected_version must be greater than zero")
 )
 
 type ValidationError struct {
@@ -101,6 +103,9 @@ func (s *Service) Create(ctx context.Context, supplier *Supplier) (int64, error)
 }
 
 func (s *Service) Update(ctx context.Context, supplier *Supplier) error {
+	if supplier.Version <= 0 {
+		return ErrSupplierVersionRequired
+	}
 	existing, err := s.repo.GetByIDIncludeDeleted(ctx, supplier.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -133,9 +138,14 @@ func (s *Service) Update(ctx context.Context, supplier *Supplier) error {
 		}
 	}()
 
-	if err := s.repo.UpdateWithTx(ctx, tx, supplier); err != nil {
+	if err = s.repo.UpdateWithTx(ctx, tx, supplier); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrSupplierNotFound
+			if _, stateErr := s.repo.GetVersionStateWithTx(ctx, tx, supplier.ID); errors.Is(stateErr, sql.ErrNoRows) {
+				return ErrSupplierNotFound
+			} else if stateErr != nil {
+				return stateErr
+			}
+			err = ErrSupplierVersionConflict
 		}
 		return err
 	}

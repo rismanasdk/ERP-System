@@ -14,17 +14,19 @@ import (
 )
 
 var (
-	ErrUserNotFound       = errors.New("user not found")
-	ErrUserEmailRequired  = errors.New("email is required")
-	ErrUserNameRequired   = errors.New("name is required")
-	ErrUserPasswordNeeded = errors.New("password is required")
-	ErrUserDuplicateEmail = errors.New("email already exists")
-	ErrUserRoleNotFound   = errors.New("role not found")
-	ErrUserBranchNotFound = errors.New("branch not found")
-	ErrUserAccessDenied   = errors.New("user access denied")
-	ErrUserSelfDelete     = errors.New("cannot delete the authenticated user")
-	ErrProtectedUser      = errors.New("the SUPER_ADMIN user is protected")
-	ErrUserPrivilege      = errors.New("insufficient privilege for requested role or branch")
+	ErrUserNotFound        = errors.New("user not found")
+	ErrUserEmailRequired   = errors.New("email is required")
+	ErrUserNameRequired    = errors.New("name is required")
+	ErrUserPasswordNeeded  = errors.New("password is required")
+	ErrUserDuplicateEmail  = errors.New("email already exists")
+	ErrUserRoleNotFound    = errors.New("role not found")
+	ErrUserBranchNotFound  = errors.New("branch not found")
+	ErrUserAccessDenied    = errors.New("user access denied")
+	ErrUserSelfDelete      = errors.New("cannot delete the authenticated user")
+	ErrProtectedUser       = errors.New("the SUPER_ADMIN user is protected")
+	ErrUserPrivilege       = errors.New("insufficient privilege for requested role or branch")
+	ErrUserVersionConflict = errors.New("user was modified by another request")
+	ErrUserVersionRequired = errors.New("expected_version must be greater than zero")
 )
 
 type Service struct {
@@ -209,6 +211,9 @@ func (s *Service) Update(ctx context.Context, user *User, roleNames []string, br
 	if user == nil || user.ID == 0 {
 		return ErrUserNotFound
 	}
+	if user.Version <= 0 {
+		return ErrUserVersionRequired
+	}
 	if err := validateUser(user); err != nil {
 		return err
 	}
@@ -265,11 +270,20 @@ func (s *Service) Update(ctx context.Context, user *User, roleNames []string, br
 		}
 	}()
 
-	if err := s.repo.UpdateWithTx(ctx, tx, user); err != nil {
+	if err = s.repo.UpdateWithTx(ctx, tx, user); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			if _, stateErr := s.repo.GetVersionStateWithTx(ctx, tx, user.ID); errors.Is(stateErr, sql.ErrNoRows) {
+				err = ErrUserNotFound
+			} else if stateErr != nil {
+				err = stateErr
+			} else {
+				err = ErrUserVersionConflict
+			}
+		}
 		return err
 	}
 
-	if err := s.repo.DeleteRolesWithTx(ctx, tx, user.ID); err != nil {
+	if err = s.repo.DeleteRolesWithTx(ctx, tx, user.ID); err != nil {
 		return err
 	}
 	for _, roleName := range roleNames {
@@ -277,33 +291,37 @@ func (s *Service) Update(ctx context.Context, user *User, roleNames []string, br
 		if trimmed == "" {
 			continue
 		}
-		role, err := s.roleRepo.GetByNameTx(ctx, tx, trimmed)
-		if err != nil {
+		role, roleErr := s.roleRepo.GetByNameTx(ctx, tx, trimmed)
+		if roleErr != nil {
+			err = roleErr
 			return err
 		}
 		if role == nil {
-			return fmt.Errorf("%w: %s", ErrUserRoleNotFound, trimmed)
+			err = fmt.Errorf("%w: %s", ErrUserRoleNotFound, trimmed)
+			return err
 		}
-		if err := s.repo.AddRoleWithTx(ctx, tx, user.ID, role.ID); err != nil {
+		if err = s.repo.AddRoleWithTx(ctx, tx, user.ID, role.ID); err != nil {
 			return err
 		}
 	}
 
-	if err := s.repo.DeleteBranchesWithTx(ctx, tx, user.ID); err != nil {
+	if err = s.repo.DeleteBranchesWithTx(ctx, tx, user.ID); err != nil {
 		return err
 	}
 	for _, branchID := range branchIDs {
 		if branchID <= 0 {
 			continue
 		}
-		exists, err := s.repo.branchExists(ctx, branchID)
-		if err != nil {
+		exists, branchErr := s.repo.branchExists(ctx, branchID)
+		if branchErr != nil {
+			err = branchErr
 			return err
 		}
 		if !exists {
-			return fmt.Errorf("%w: %d", ErrUserBranchNotFound, branchID)
+			err = fmt.Errorf("%w: %d", ErrUserBranchNotFound, branchID)
+			return err
 		}
-		if err := s.repo.AddBranchWithTx(ctx, tx, user.ID, branchID); err != nil {
+		if err = s.repo.AddBranchWithTx(ctx, tx, user.ID, branchID); err != nil {
 			return err
 		}
 	}

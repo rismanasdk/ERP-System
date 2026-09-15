@@ -2,6 +2,8 @@ import type { ApiEnvelope } from '../types/auth'
 import type { Supplier, SupplierFilter } from '../types/supplier'
 import { api } from '../lib/api'
 
+export type SupplierUpdatePayload = Partial<Supplier> & { expected_version: number }
+
 export const suppliersApi = {
   list: async (filter?: SupplierFilter, token?: string): Promise<Supplier[]> => {
     const q = [] as string[]
@@ -22,7 +24,7 @@ export const suppliersApi = {
     return res.data
   },
 
-  update: async (id: number, payload: Partial<Supplier>, token?: string): Promise<Supplier> => {
+  update: async (id: number, payload: SupplierUpdatePayload, token?: string): Promise<Supplier> => {
     const res = await api.put<ApiEnvelope<Supplier>>(`/api/v1/suppliers/${id}`, payload, token)
     return res.data
   },

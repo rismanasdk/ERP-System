@@ -2,6 +2,8 @@ import type { ApiEnvelope } from '../types/auth'
 import type { Branch } from '../types/auth'
 import { api } from '../lib/api'
 
+export type BranchUpdatePayload = Partial<Branch> & { expected_version: number }
+
 export const branchesApi = {
   list: async (active?: boolean, token?: string): Promise<Branch[]> => {
     const q: string[] = []
@@ -21,7 +23,7 @@ export const branchesApi = {
     return res.data
   },
 
-  update: async (id: number, payload: Partial<Branch>, token?: string): Promise<Branch> => {
+  update: async (id: number, payload: BranchUpdatePayload, token?: string): Promise<Branch> => {
     const res = await api.put<ApiEnvelope<Branch>>(`/api/v1/branches/${id}`, payload, token)
     return res.data
   },

@@ -10,6 +10,7 @@ export type Product = {
   purchase_price: number
   selling_price: number
   minimum_stock: number
+  version: number
   is_active: boolean
   created_at?: string
   updated_at?: string

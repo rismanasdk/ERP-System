@@ -37,7 +37,10 @@ type createUserRequest struct {
 	IsActive  *bool    `json:"is_active,omitempty"`
 }
 
-type updateUserRequest = createUserRequest
+type updateUserRequest struct {
+	createUserRequest
+	ExpectedVersion int64 `json:"expected_version"`
+}
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
@@ -112,6 +115,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	user := &User{
 		ID:           id,
 		Email:        req.Email,
+		Version:      req.ExpectedVersion,
 		PasswordHash: req.Password,
 		Name:         req.Name,
 		IsActive:     req.IsActive == nil || *req.IsActive,
@@ -164,6 +168,10 @@ func handleServiceError(w http.ResponseWriter, err error, message string) {
 		response.JSONError(w, http.StatusForbidden, response.NewAPIError(http.StatusForbidden, "FORBIDDEN", err.Error()))
 	case errors.Is(err, ErrUserSelfDelete), errors.Is(err, ErrProtectedUser):
 		response.JSONError(w, http.StatusConflict, response.NewAPIError(http.StatusConflict, "PROTECTED_USER", err.Error()))
+	case errors.Is(err, ErrUserVersionConflict):
+		response.JSONError(w, http.StatusConflict, response.NewAPIError(http.StatusConflict, "CONFLICT", err.Error()))
+	case errors.Is(err, ErrUserVersionRequired):
+		response.JSONError(w, http.StatusBadRequest, response.NewAPIError(http.StatusBadRequest, "INVALID_REQUEST", err.Error()))
 	default:
 		response.JSONError(w, http.StatusInternalServerError, response.NewAPIError(http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", message))
 	}

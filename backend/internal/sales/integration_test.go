@@ -52,6 +52,7 @@ func TestSalesCompleteConcurrentIntegration(t *testing.T) {
 	randSuffix := fmt.Sprintf("sales_%d", time.Now().UnixNano())
 	branchCode := "BR-" + randSuffix
 	productSKU := "SKU-" + randSuffix
+	secondProductSKU := "SKU-SECOND-" + randSuffix
 	userEmail := randSuffix + "@example.local"
 
 	branchID, err := ensureBranch(db, branchCode)
@@ -62,6 +63,10 @@ func TestSalesCompleteConcurrentIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create product: %v", err)
 	}
+	secondProductID, err := ensureProduct(db, secondProductSKU)
+	if err != nil {
+		t.Fatalf("failed to create second product: %v", err)
+	}
 	userID, err := ensureUser(db, userEmail)
 	if err != nil {
 		t.Fatalf("failed to create user: %v", err)
@@ -70,15 +75,17 @@ func TestSalesCompleteConcurrentIntegration(t *testing.T) {
 		t.Fatalf("failed to grant role/branch access: %v", err)
 	}
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO inventory (product_id, branch_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (product_id, branch_id) DO UPDATE SET quantity = EXCLUDED.quantity`, productID, branchID, 5); err != nil {
-		t.Fatalf("failed to seed inventory: %v", err)
+	for _, seededProductID := range []int64{productID, secondProductID} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO inventory (product_id, branch_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (product_id, branch_id) DO UPDATE SET quantity = EXCLUDED.quantity`, seededProductID, branchID, 5); err != nil {
+			t.Fatalf("failed to seed inventory: %v", err)
+		}
 	}
 
-	firstSaleID, err := svc.CreateSale(auth.ContextWithUserID(ctx, userID), CreateSaleInput{BranchID: branchID, Items: []CreateSaleItemInput{{ProductID: productID, Quantity: 4, UnitPrice: 10}}})
+	firstSaleID, err := svc.CreateSale(auth.ContextWithUserID(ctx, userID), CreateSaleInput{BranchID: branchID, Items: []CreateSaleItemInput{{ProductID: productID, Quantity: 1, UnitPrice: 10}, {ProductID: secondProductID, Quantity: 1, UnitPrice: 10}}})
 	if err != nil {
 		t.Fatalf("failed to create first sale: %v", err)
 	}
-	secondSaleID, err := svc.CreateSale(auth.ContextWithUserID(ctx, userID), CreateSaleInput{BranchID: branchID, Items: []CreateSaleItemInput{{ProductID: productID, Quantity: 4, UnitPrice: 10}}})
+	secondSaleID, err := svc.CreateSale(auth.ContextWithUserID(ctx, userID), CreateSaleInput{BranchID: branchID, Items: []CreateSaleItemInput{{ProductID: secondProductID, Quantity: 1, UnitPrice: 10}, {ProductID: productID, Quantity: 1, UnitPrice: 10}}})
 	if err != nil {
 		t.Fatalf("failed to create second sale: %v", err)
 	}
@@ -104,16 +111,25 @@ func TestSalesCompleteConcurrentIntegration(t *testing.T) {
 			okCount++
 		}
 	}
-	if okCount != 1 {
-		t.Fatalf("expected exactly one sale to complete under stock contention, got %d successes", okCount)
+	if okCount != 2 {
+		t.Fatalf("expected both sales to complete with sufficient stock, got %d successes", okCount)
 	}
 
-	var qty int64
-	if err := db.QueryRowContext(ctx, `SELECT quantity FROM inventory WHERE product_id = $1 AND branch_id = $2`, productID, branchID).Scan(&qty); err != nil {
-		t.Fatalf("failed to read inventory quantity: %v", err)
+	for _, seededProductID := range []int64{productID, secondProductID} {
+		var qty int64
+		if err := db.QueryRowContext(ctx, `SELECT quantity FROM inventory WHERE product_id = $1 AND branch_id = $2`, seededProductID, branchID).Scan(&qty); err != nil {
+			t.Fatalf("failed to read inventory quantity: %v", err)
+		}
+		if qty != 3 {
+			t.Fatalf("expected final inventory quantity 3 for product %d, got %d", seededProductID, qty)
+		}
 	}
-	if qty != 1 {
-		t.Fatalf("expected final inventory quantity 1 after one successful completion, got %d", qty)
+	var movementCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM stock_movements WHERE reference_type = 'sale' AND reference_id IN ($1, $2)`, firstSaleID, secondSaleID).Scan(&movementCount); err != nil {
+		t.Fatalf("failed to count stock movements: %v", err)
+	}
+	if movementCount != 4 {
+		t.Fatalf("expected four stock movements for two two-item sales, got %d", movementCount)
 	}
 }
 

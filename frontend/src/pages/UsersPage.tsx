@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useBranch } from '../contexts/BranchContext'
-import { usersApi } from '../services/users'
+import { usersApi, type UserUpdatePayload } from '../services/users'
 import { rolesApi } from '../services/roles'
 import { readStoredAccessToken } from '../services/authSession'
 import { ApiError } from '../lib/api'
@@ -11,6 +11,7 @@ import { Dialog, DialogContent } from '../components/ui/dialog'
 
 type UserRow = {
   id: number
+  version: number
   name: string
   email: string
   roles: string[]
@@ -23,6 +24,7 @@ type UserRow = {
 
 type ApiUser = {
   id: number
+  version: number
   name?: string
   email: string
   roles?: string[]
@@ -97,6 +99,7 @@ export function UsersPage() {
         })
         return {
           id: u.id,
+          version: u.version,
           name: u.name ?? u.email,
           email: u.email,
           roles: u.roles ?? u.RoleNames ?? [],
@@ -151,11 +154,18 @@ export function UsersPage() {
     if (!editing) return
     setSubmitting(true)
     try {
-      await usersApi.update(editing.id, payload, token)
+      const updatePayload: UserUpdatePayload = { ...payload, expected_version: editing.version }
+      await usersApi.update(editing.id, updatePayload, token)
       setEditing(null)
       await load()
     } catch (err) {
       const e = err as ApiError
+      if (e instanceof ApiError && e.status === 409) {
+        setEditing(null)
+        setError('This user was changed by someone else. The latest data has been loaded.')
+        await load()
+        return
+      }
       throw e
     } finally {
       setSubmitting(false)

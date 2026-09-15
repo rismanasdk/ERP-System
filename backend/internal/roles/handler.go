@@ -87,7 +87,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		roleError(w, http.StatusBadRequest, "INVALID_REQUEST", "role name is required")
 		return
 	}
-	id, err := h.repo.Create(r.Context(), &Role{Name: req.Name, Description: req.Description}, req.Permissions)
+	id, err := h.repo.Create(r.Context(), &Role{Name: req.Name, Description: req.Description}, req.Permissions, actorUserID(r))
 	if err != nil {
 		handleRoleError(w, err)
 		return
@@ -120,7 +120,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		roleError(w, http.StatusBadRequest, "INVALID_REQUEST", "role name is required")
 		return
 	}
-	if err := h.repo.Update(r.Context(), &Role{ID: id, Name: req.Name, Description: req.Description}, req.Permissions); err != nil {
+	if err := h.repo.Update(r.Context(), &Role{ID: id, Name: req.Name, Description: req.Description}, req.Permissions, actorUserID(r)); err != nil {
 		handleRoleError(w, err)
 		return
 	}
@@ -143,7 +143,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		roleError(w, http.StatusBadRequest, "INVALID_ID", "invalid role id")
 		return
 	}
-	if err := h.repo.Delete(r.Context(), id); err != nil {
+	if err := h.repo.Delete(r.Context(), id, actorUserID(r)); err != nil {
 		handleRoleError(w, err)
 		return
 	}
@@ -171,4 +171,12 @@ func handleRoleError(w http.ResponseWriter, err error) {
 
 func roleError(w http.ResponseWriter, status int, code, message string) {
 	response.JSONError(w, status, response.NewAPIError(status, code, message))
+}
+
+func actorUserID(r *http.Request) *int64 {
+	userID, ok := r.Context().Value("userID").(int64)
+	if !ok {
+		return nil
+	}
+	return &userID
 }

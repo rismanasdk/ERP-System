@@ -35,13 +35,14 @@ func (r *Repository) CreateWithTx(ctx context.Context, tx *sql.Tx, branch *Branc
 func (r *Repository) GetByID(ctx context.Context, id int64) (*Branch, error) {
 	branch := &Branch{}
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, name, code, is_active, created_at, updated_at
+		SELECT id, name, code, version, is_active, created_at, updated_at
         FROM branches
         WHERE id = $1
     `, id).Scan(
 		&branch.ID,
 		&branch.Name,
 		&branch.Code,
+		&branch.Version,
 		&branch.IsActive,
 		&branch.CreatedAt,
 		&branch.UpdatedAt,
@@ -55,13 +56,14 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Branch, error) {
 func (r *Repository) GetByCode(ctx context.Context, code string) (*Branch, error) {
 	branch := &Branch{}
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, name, code, is_active, created_at, updated_at
+		SELECT id, name, code, version, is_active, created_at, updated_at
         FROM branches
         WHERE code = $1
     `, code).Scan(
 		&branch.ID,
 		&branch.Name,
 		&branch.Code,
+		&branch.Version,
 		&branch.IsActive,
 		&branch.CreatedAt,
 		&branch.UpdatedAt,
@@ -74,7 +76,7 @@ func (r *Repository) GetByCode(ctx context.Context, code string) (*Branch, error
 
 func (r *Repository) List(ctx context.Context, filter BranchFilter) ([]Branch, error) {
 	query := `
-        SELECT id, name, code, is_active, created_at, updated_at
+		SELECT id, name, code, version, is_active, created_at, updated_at
         FROM branches
     `
 	args := []any{}
@@ -105,6 +107,7 @@ func (r *Repository) List(ctx context.Context, filter BranchFilter) ([]Branch, e
 			&branch.ID,
 			&branch.Name,
 			&branch.Code,
+			&branch.Version,
 			&branch.IsActive,
 			&branch.CreatedAt,
 			&branch.UpdatedAt,
@@ -121,7 +124,7 @@ func (r *Repository) List(ctx context.Context, filter BranchFilter) ([]Branch, e
 
 func (r *Repository) ListAccessibleBranches(ctx context.Context, filter BranchFilter, userID int64) ([]Branch, error) {
 	query := `
-        SELECT b.id, b.name, b.code, b.is_active, b.created_at, b.updated_at
+		SELECT b.id, b.name, b.code, b.version, b.is_active, b.created_at, b.updated_at
         FROM branches b
         JOIN user_branches ub ON ub.branch_id = b.id
         WHERE ub.user_id = $1
@@ -149,6 +152,7 @@ func (r *Repository) ListAccessibleBranches(ctx context.Context, filter BranchFi
 			&branch.ID,
 			&branch.Name,
 			&branch.Code,
+			&branch.Version,
 			&branch.IsActive,
 			&branch.CreatedAt,
 			&branch.UpdatedAt,
@@ -166,9 +170,9 @@ func (r *Repository) ListAccessibleBranches(ctx context.Context, filter BranchFi
 func (r *Repository) UpdateWithTx(ctx context.Context, tx *sql.Tx, branch *Branch) error {
 	res, err := tx.ExecContext(ctx, `
         UPDATE branches
-        SET name = $1, code = $2, is_active = $3, updated_at = NOW()
-        WHERE id = $4
-    `, branch.Name, branch.Code, branch.IsActive, branch.ID)
+		SET name = $1, code = $2, is_active = $3, version = version + 1, updated_at = NOW()
+		WHERE id = $4 AND version = $5
+	`, branch.Name, branch.Code, branch.IsActive, branch.ID, branch.Version)
 	if err != nil {
 		return err
 	}
@@ -180,6 +184,12 @@ func (r *Repository) UpdateWithTx(ctx context.Context, tx *sql.Tx, branch *Branc
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (r *Repository) GetVersionStateWithTx(ctx context.Context, tx *sql.Tx, id int64) (int64, error) {
+	var version int64
+	err := tx.QueryRowContext(ctx, `SELECT version FROM branches WHERE id = $1 FOR UPDATE`, id).Scan(&version)
+	return version, err
 }
 
 var ErrUserBranchDuplicate = errors.New("user branch assignment already exists")
