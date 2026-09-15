@@ -55,6 +55,7 @@ type PurchaseReceipt struct {
 type PurchaseReceiptItem struct {
 	ID               int64 `json:"id"`
 	ReceiptID        int64 `json:"purchase_receipt_id"`
+	PurchaseOrderID  int64 `json:"-"`
 	PurchaseItemID   int64 `json:"purchase_order_item_id"`
 	ProductID        int64 `json:"product_id"`
 	QuantityReceived int64 `json:"quantity_received"`

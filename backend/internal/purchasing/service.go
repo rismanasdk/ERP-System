@@ -269,7 +269,7 @@ func (s *Service) ReceivePurchase(ctx context.Context, purchaseID int64, input R
 		} else if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inventoryRow.ID, inventoryRow.Quantity+received.Quantity); err != nil {
 			return 0, err
 		}
-		if _, err = s.repo.CreateReceiptItemWithTx(ctx, tx, &PurchaseReceiptItem{ReceiptID: receiptID, PurchaseItemID: item.ID, ProductID: item.ProductID, QuantityReceived: received.Quantity}); err != nil {
+		if _, err = s.repo.CreateReceiptItemWithTx(ctx, tx, &PurchaseReceiptItem{ReceiptID: receiptID, PurchaseOrderID: purchaseID, PurchaseItemID: item.ID, ProductID: item.ProductID, QuantityReceived: received.Quantity}); err != nil {
 			return 0, err
 		}
 		newReceived := item.ReceivedQuantity + received.Quantity

@@ -364,7 +364,7 @@ func (r *Repository) CreateFulfillmentWithTx(ctx context.Context, tx *sql.Tx, fu
 
 func (r *Repository) CreateFulfillmentItemWithTx(ctx context.Context, tx *sql.Tx, item *SaleFulfillmentItem) (int64, error) {
 	var id int64
-	err := tx.QueryRowContext(ctx, `INSERT INTO sales_fulfillment_items (sales_fulfillment_id, sales_order_item_id, product_id, quantity_fulfilled) VALUES ($1, $2, $3, $4) RETURNING id`, item.FulfillmentID, item.SaleItemID, item.ProductID, item.QuantityFulfilled).Scan(&id)
+	err := tx.QueryRowContext(ctx, `INSERT INTO sales_fulfillment_items (sales_fulfillment_id, sales_order_id, sales_order_item_id, product_id, quantity_fulfilled) VALUES ($1, $2, $3, $4, $5) RETURNING id`, item.FulfillmentID, item.SalesOrderID, item.SaleItemID, item.ProductID, item.QuantityFulfilled).Scan(&id)
 	return id, err
 }
 

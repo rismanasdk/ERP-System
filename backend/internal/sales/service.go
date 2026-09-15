@@ -466,7 +466,7 @@ func (s *Service) FulfillSale(ctx context.Context, saleID int64, input FulfillSa
 		if err = s.inventoryRepo.UpdateQuantityWithTx(ctx, tx, inv.ID, inv.Quantity-inputItem.Quantity); err != nil {
 			return 0, err
 		}
-		if _, err = s.repo.CreateFulfillmentItemWithTx(ctx, tx, &SaleFulfillmentItem{FulfillmentID: fulfillmentID, SaleItemID: item.ID, ProductID: item.ProductID, QuantityFulfilled: inputItem.Quantity}); err != nil {
+		if _, err = s.repo.CreateFulfillmentItemWithTx(ctx, tx, &SaleFulfillmentItem{FulfillmentID: fulfillmentID, SalesOrderID: saleID, SaleItemID: item.ID, ProductID: item.ProductID, QuantityFulfilled: inputItem.Quantity}); err != nil {
 			return 0, err
 		}
 		if err = s.repo.UpdateSaleItemFulfilledWithTx(ctx, tx, item.ID, item.FulfilledQuantity+inputItem.Quantity); err != nil {
@@ -658,6 +658,27 @@ func moneyCents(value float64) (int64, bool) {
 }
 
 func (s *Service) ListFulfillments(ctx context.Context, saleID int64) ([]SaleFulfillment, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok || userID == 0 {
+		return nil, ErrAuthenticationRequired
+	}
+	allowed, err := s.authChecker.HasPermission(ctx, userID, SaleReadPermission)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrForbidden
+	}
+	sale, err := s.repo.GetSaleByID(ctx, saleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrSaleNotFound
+		}
+		return nil, err
+	}
+	if err = s.branchSvc.EnsureUserHasAccess(ctx, userID, sale.BranchID, true); err != nil {
+		return nil, err
+	}
 	return s.repo.ListFulfillments(ctx, saleID)
 }
 

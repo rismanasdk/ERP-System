@@ -177,6 +177,11 @@ func (s *Service) Create(ctx context.Context, user *User, roleNames []string, br
 			return 0, err
 		}
 	}
+	if _, scoped := actorIDFromContext(ctx); scoped {
+		if err = s.repo.SetActiveStatusWithTx(ctx, tx, id, user.IsActive); err != nil {
+			return 0, err
+		}
+	}
 
 	if s.auditSvc != nil {
 		auditResourceID := fmt.Sprintf("%d", id)
@@ -196,11 +201,6 @@ func (s *Service) Create(ctx context.Context, user *User, roleNames []string, br
 
 	if err = tx.Commit(); err != nil {
 		return 0, err
-	}
-	if _, scoped := actorIDFromContext(ctx); scoped {
-		if err := s.repo.SetActiveStatus(ctx, id, user.IsActive); err != nil {
-			return 0, err
-		}
 	}
 	return id, nil
 }
@@ -307,6 +307,11 @@ func (s *Service) Update(ctx context.Context, user *User, roleNames []string, br
 			return err
 		}
 	}
+	if _, scoped := actorIDFromContext(ctx); scoped {
+		if err = s.repo.SetActiveStatusWithTx(ctx, tx, user.ID, user.IsActive); err != nil {
+			return err
+		}
+	}
 
 	if s.auditSvc != nil {
 		auditResourceID := fmt.Sprintf("%d", user.ID)
@@ -326,11 +331,6 @@ func (s *Service) Update(ctx context.Context, user *User, roleNames []string, br
 
 	if err = tx.Commit(); err != nil {
 		return err
-	}
-	if _, scoped := actorIDFromContext(ctx); scoped {
-		if err := s.repo.SetActiveStatus(ctx, user.ID, user.IsActive); err != nil {
-			return err
-		}
 	}
 	return nil
 }

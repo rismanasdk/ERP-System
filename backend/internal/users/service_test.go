@@ -3,6 +3,7 @@ package users
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"testing"
 
@@ -11,6 +12,46 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
+
+func TestService_Create_RollsBackWhenActiveStatusUpdateFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	userRepo := NewRepository(db)
+	service := NewService(userRepo, roles.NewRepository(db), nil)
+	ctx := context.WithValue(context.Background(), "userID", int64(99))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT r.name
+		FROM roles r
+		JOIN user_roles ur ON ur.role_id = r.id
+		WHERE ur.user_id = $1
+	`)).WithArgs(int64(99)).WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("SUPER_ADMIN"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT id, email, password_hash, name, created_at, updated_at
+        FROM users
+        WHERE email = $1
+    `)).WithArgs("atomic@example.com").WillReturnError(sql.ErrNoRows)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		INSERT INTO users (email, password_hash, name)
+		VALUES ($1, $2, $3)
+        RETURNING id
+	`)).WithArgs("atomic@example.com", sqlmock.AnyArg(), "Atomic").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(42)))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2`)).WithArgs(false, int64(42)).WillReturnError(errors.New("active status failure"))
+	mock.ExpectRollback()
+
+	_, err = service.Create(ctx, &User{Email: "atomic@example.com", PasswordHash: "password123", Name: "Atomic", IsActive: false}, nil, nil)
+	if err == nil || err.Error() != "active status failure" {
+		t.Fatalf("expected active status error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
 
 func TestService_Create_AssignsRolesAndBranchAccess(t *testing.T) {
 	db, mock, err := sqlmock.New()

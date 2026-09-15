@@ -198,7 +198,9 @@ export function ReportsPage() {
   }, [canRead, loadBranches, loadInventory, loadPayments, loadPurchases, loadSales, tab])
 
   useEffect(() => {
-    void fetchCurrentTab()
+    void (async () => {
+      await fetchCurrentTab()
+    })()
   }, [fetchCurrentTab])
 
   const tabConfig: Array<{ key: ReportsTab; label: string }> = [

@@ -341,6 +341,20 @@ func TestReceivePurchase_RejectsOverReceive(t *testing.T) {
 	}
 }
 
+func TestReceivePurchase_RejectsItemFromAnotherPurchase(t *testing.T) {
+	service, repo, _, mock, cleanup := newServiceWithMocks(t)
+	defer cleanup()
+	repo.purchase = &Purchase{ID: 42, BranchID: 1, Status: "ORDERED"}
+	repo.purchaseItems = []PurchaseItem{{ID: 7, PurchaseID: 42, ProductID: 5, Quantity: 10}}
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	_, err := service.ReceivePurchase(auth.ContextWithUserID(context.Background(), 7), 42, ReceivePurchaseInput{Items: []ReceivePurchaseItemInput{{PurchaseItemID: 99, Quantity: 1}}})
+	if !errors.Is(err, ErrPurchaseNotFound) {
+		t.Fatalf("expected mismatched purchase item rejection, got %v", err)
+	}
+}
+
 func TestCreatePurchase_DuplicateProduct(t *testing.T) {
 	service, repo, _, _, cleanup := newServiceWithMocks(t)
 	defer cleanup()

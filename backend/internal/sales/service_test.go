@@ -205,6 +205,29 @@ func TestFulfillSale_PartialAndFinal(t *testing.T) {
 	}
 }
 
+func TestFulfillSale_RejectsItemFromAnotherSale(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := newFakeSaleRepo()
+	repo.db = db
+	repo.sales[1] = &Sale{ID: 1, BranchID: 2, Status: SaleStatusConfirmed}
+	repo.itemsBySaleID[1] = []SaleItem{{ID: 10, SaleID: 1, ProductID: 5, Quantity: 1}}
+	service := NewService(repo, newFakeInventoryRepo(), &fakeProductService{products: map[int64]*products.Product{5: {ID: 5, IsActive: true}}}, &fakeBranchService{allowedBranches: []branches.Branch{{ID: 2, IsActive: true}}}, &fakeAuthChecker{allowed: true}, nil)
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	_, err = service.FulfillSale(auth.ContextWithUserID(context.Background(), 7), 1, FulfillSaleInput{Items: []FulfillSaleItemInput{{SaleItemID: 99, Quantity: 1}}})
+	if !errors.Is(err, ErrSaleNotFound) {
+		t.Fatalf("expected mismatched sale item rejection, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func (r *fakeInventoryRepo) GetByProductAndBranchForUpdate(ctx context.Context, tx *sql.Tx, productID, branchID int64) (*inventory.Inventory, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -297,6 +320,31 @@ type fakeAuditService struct {
 func (f *fakeAuditService) RecordWithTx(ctx context.Context, tx *sql.Tx, auditLog audit.AuditLog) (int64, error) {
 	f.lastLog = auditLog
 	return 1, f.err
+}
+
+func TestListFulfillments_RequiresSaleBranchAccess(t *testing.T) {
+	repo := newFakeSaleRepo()
+	repo.sales[1] = &Sale{ID: 1, BranchID: 2}
+	service := NewService(repo, newFakeInventoryRepo(), &fakeProductService{}, &fakeBranchService{allowedBranches: []branches.Branch{{ID: 2, IsActive: true}}}, &fakeAuthChecker{allowed: true}, nil)
+
+	if _, err := service.ListFulfillments(auth.ContextWithUserID(context.Background(), 7), 1); err != nil {
+		t.Fatalf("same-branch fulfillment access failed: %v", err)
+	}
+
+	repo.sales[2] = &Sale{ID: 2, BranchID: 3}
+	if _, err := service.ListFulfillments(auth.ContextWithUserID(context.Background(), 7), 2); !errors.Is(err, branches.ErrBranchAccessDenied) {
+		t.Fatalf("expected cross-branch access denial, got %v", err)
+	}
+}
+
+func TestListFulfillments_RequiresSalesReadPermission(t *testing.T) {
+	repo := newFakeSaleRepo()
+	repo.sales[1] = &Sale{ID: 1, BranchID: 2}
+	service := NewService(repo, newFakeInventoryRepo(), &fakeProductService{}, &fakeBranchService{allowedBranches: []branches.Branch{{ID: 2, IsActive: true}}}, &fakeAuthChecker{allowed: false}, nil)
+
+	if _, err := service.ListFulfillments(auth.ContextWithUserID(context.Background(), 7), 1); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected missing permission denial, got %v", err)
+	}
 }
 
 func newSalesServiceWithDB(t *testing.T, repo *fakeSaleRepo, invRepo *fakeInventoryRepo, auditSvc auditService) (*Service, sqlmock.Sqlmock) {
